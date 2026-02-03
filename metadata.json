@@ -1,0 +1,5 @@
+{
+  "name": "LG Inmobiliaria CRM",
+  "description": "Real-time Real Estate CRM backed by Google Sheets with optimistic concurrency control.",
+  "requestFramePermissions": []
+}

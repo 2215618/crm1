@@ -1,0 +1,68 @@
+{
+  "meta": { "last_change_ts": "2023-10-24T10:00:00Z" },
+  "properties": [
+    {
+      "id": "PROP-001",
+      "operacion": "Alquiler",
+      "tipo": "Casa",
+      "propietario_nombre": "Juan Pérez",
+      "propietario_celular": "999888777",
+      "distrito": "Punchana",
+      "direccion": "Calle Huánuco",
+      "area_m2": 210,
+      "precio_soles": 3000,
+      "precio_usd_ref": 800,
+      "disponibilidad": "Disponible",
+      "amoblado": true,
+      "tags": ["Cochera", "Patio"],
+      "descripcion": "Casa amplia ideal para oficinas.",
+      "image_url": "https://picsum.photos/seed/p1/400/300",
+      "version": 1,
+      "updated_at": "2023-10-24T09:00:00Z"
+    },
+    {
+      "id": "PROP-002",
+      "operacion": "Venta",
+      "tipo": "Casa",
+      "propietario_nombre": "Maria Lopez",
+      "propietario_celular": "987654321",
+      "distrito": "Iquitos",
+      "direccion": "Fanning N°1252",
+      "area_m2": 187.9,
+      "precio_soles": 480000,
+      "precio_usd_ref": 130000,
+      "disponibilidad": "Disponible",
+      "amoblado": false,
+      "tags": ["Piscina", "24h"],
+      "descripcion": "Casa residencial zona tranquila.",
+      "image_url": "https://picsum.photos/seed/p2/400/300",
+      "version": 1,
+      "updated_at": "2023-10-24T09:00:00Z"
+    }
+  ],
+  "appointments": [
+    {
+      "id": "CITA-001",
+      "fecha": "2023-10-24",
+      "hora": "10:00",
+      "estado": "Confirmada",
+      "interesado_nombre": "Maria Gonzalez",
+      "interesado_celular": "999000111",
+      "propiedad_id": "PROP-001",
+      "notificado": false,
+      "version": 1
+    }
+  ],
+  "leads": [
+     {
+      "id": "LEAD-001",
+      "nombre": "Carlos Rodriguez",
+      "celular": "999888777",
+      "interes": "Comprar",
+      "presupuesto": "S/ 450,000",
+      "estado": "Nuevo",
+      "version": 1,
+      "created_at": "2023-10-24T08:00:00Z"
+     }
+  ]
+}
