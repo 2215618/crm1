@@ -1,213 +1,105 @@
-import type {
-  Appointment,
-  AppointmentStatus,
-  Lead,
-  LeadSource,
-  LeadStage,
-  Property,
-  PropertyOperation,
-  PropertyStatus,
-  PropertyType,
-} from "@/types";
+import type { Appointment, Lead, Property } from '@/types';
 
-type Row = any[];
+const clean = (v: unknown) => String(v ?? '').trim();
 
-const s = (v: any) => (v ?? "").toString().trim();
-
-const slugify = (input: string) =>
-  input
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-
-const parseNumber = (v: any): number | undefined => {
-  const str = s(v)
-    .replace(/,/g, ".")
-    .replace(/\s+/g, " ")
-    .replace(/[^0-9.\-]/g, "");
-  if (!str) return undefined;
-  const n = Number(str);
-  return Number.isFinite(n) ? n : undefined;
+const toNumber = (v: unknown): number => {
+  const s = clean(v)
+    .replace(/S\//gi, '')
+    .replace(/usd/gi, '')
+    .replace(/,/g, '')
+    .replace(/\s/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
 };
 
-const parseMoney = (v: any): number | undefined => {
-  const raw = s(v).toLowerCase();
-  if (!raw) return undefined;
-
-  let mult = 1;
-  if (raw.includes("mil")) mult = 1000;
-  if (raw.includes("mill")) mult = 1_000_000;
-
-  const cleaned = raw
-    .replace(/s\//g, "")
-    .replace(/usd/g, "")
-    .replace(/\$/g, "")
-    .replace(/,/g, "")
-    .replace(/[^0-9.\-]/g, "");
-
-  if (!cleaned) return undefined;
-  const n = Number(cleaned);
-  if (!Number.isFinite(n)) return undefined;
-  return n * mult;
+const parseUsdRef = (v: unknown): number => {
+  const raw = clean(v).toLowerCase();
+  if (!raw) return 0;
+  const withDots = raw.replace(/,/g, '').replace(/\s+/g, '');
+  const milMatch = withDots.match(/^([0-9]+(?:\.[0-9]+)?)mil$/);
+  if (milMatch) return Math.round(Number(milMatch[1]) * 1000);
+  const n = Number(withDots);
+  return Number.isFinite(n) ? n : 0;
 };
 
-const mapOperation = (raw: string): PropertyOperation => {
-  const v = raw.toLowerCase();
-  if (v.includes("alquiler") || v.includes("rent")) return "Alquiler";
-  if (v.includes("venta") || v.includes("sell")) return "Venta";
-  return "Alquiler";
+const deriveStatus = (estado: string): Property['disponibilidad'] => {
+  const s = estado.toLowerCase();
+  if (s.includes('reserv')) return 'Reservado';
+  if (s.includes('no')) return 'No disponible';
+  return 'Disponible';
 };
 
-const mapType = (raw: string): PropertyType => {
-  const v = raw.toLowerCase();
-  if (v.includes("depa")) return "Departamento";
-  if (v.includes("mono")) return "Departamento";
-  if (v.includes("casa")) return "Casa";
-  if (v.includes("ofic")) return "Oficina";
-  if (v.includes("terreno") || v.includes("lote")) return "Terreno";
-  if (v.includes("local")) return "Local";
-  return "Casa";
-};
+export function mapRowsToProperties(rows: any[][]): Property[] {
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+  const data = rows.slice(1);
 
-const mapStatus = (raw: string): PropertyStatus => {
-  const v = raw.toLowerCase();
-  if (v.includes("reserv")) return "Reservado";
-  if (v.includes("no disp") || v.includes("vendid") || v.includes("ocup"))
-    return "No disponible";
-  // En tu base real aparece "Sin amoblar / Amoblado" en estado: eso NO es disponibilidad
-  return "Disponible";
-};
+  return data.map((row, i) => {
+    const propietario_nombre = clean(row[0]);
+    const tipo = clean(row[1]) as any;
+    const direccion = clean(row[2]);
+    const distrito = clean(row[3]);
+    const frente = toNumber(row[4]);
+    const fondo = toNumber(row[5]);
+    const area_m2 = toNumber(row[6]);
+    const descripcion = clean(row[7]);
+    const precio_soles = toNumber(row[8]);
+    const estadoRaw = clean(row[10]);
+    const disponibilidad = deriveStatus(estadoRaw);
+    const amoblado = estadoRaw.toLowerCase().includes('amobl');
+    const operacion = clean(row[12]) === 'VENTA' ? 'Venta' : 'Alquiler';
+    const precio_usd_ref = parseUsdRef(row[14]);
 
-const mapLeadStage = (raw: string): LeadStage => {
-  const v = raw.toLowerCase();
-  if (v.includes("contact")) return "Contactado";
-  if (v.includes("calient")) return "Caliente";
-  if (v.includes("cerr")) return "Cerrado";
-  return "Nuevo";
-};
+    const id = clean(row[11]) || `PROP-${String(i + 1).padStart(3, '0')}`;
 
-const mapLeadSource = (raw: string): LeadSource => {
-  const v = raw.toLowerCase();
-  if (v.includes("whats")) return "WhatsApp";
-  if (v.includes("web")) return "Web";
-  if (v.includes("ref")) return "Referencia";
-  return "Facebook";
-};
-
-const mapAppointmentStatus = (raw: string): AppointmentStatus => {
-  const v = raw.toLowerCase();
-  if (v.includes("confirm")) return "Confirmada";
-  if (v.includes("cancel")) return "Cancelada";
-  if (v.includes("reprog")) return "Reprogramada";
-  return "Pendiente";
-};
-
-/**
- * PROPERTIES (tu formato real)
- * A propietario | B tipo | C dirección | D zona | E frente | F fondo | G área | H características |
- * I precio S/ | J garantía | K estado | L partida | M operación | N moneda | O precio USD ref |
- * P ID interno | Q created_at | R updated_at
- */
-export function mapRowsToProperties(rows: Row[]): Property[] {
-  return rows
-    .filter((r) => Array.isArray(r) && r.some((c) => s(c) !== ""))
-    .map((row, idx): Property => {
-      const tipoRaw = s(row[1]);
-      const direccion = s(row[2]);
-      const zona = s(row[3]);
-
-      const area = parseNumber(row[6]);
-      const descripcion = s(row[7]);
-
-      const precioSoles = parseMoney(row[8]);
-      const monedaRaw = s(row[13]);
-      const precioUsdRef = parseMoney(row[14]);
-
-      const operacion = mapOperation(s(row[12]));
-      const status = mapStatus(s(row[10]));
-
-      const idInterno = s(row[15]);
-      const id = idInterno || slugify(`${direccion}-${idx + 2}`) || `prop-${idx + 2}`;
-
-      const currency: "PEN" | "USD" =
-        monedaRaw.toUpperCase().includes("USD") || monedaRaw === "$" ? "USD" : "PEN";
-
-      const price =
-        currency === "USD"
-          ? precioUsdRef ?? precioSoles ?? 0
-          : precioSoles ?? precioUsdRef ?? 0;
-
-      const title = `${tipoRaw || "Inmueble"} ${
-        operacion === "Alquiler" ? "en Alquiler" : "en Venta"
-      }${zona ? ` - ${zona}` : ""}`;
-
-      const tags = [operacion, status, zona].filter(Boolean).slice(0, 6) as string[];
-
-      return {
-        id,
-        title,
-        type: mapType(tipoRaw),
-        operation: operacion,
-        price,
-        currency,
-        status,
-        location: zona || "Iquitos",
-        address: direccion,
-        area,
-        bedrooms: undefined,
-        bathrooms: undefined,
-        agent: "LG Inmobiliaria",
-        tags,
-        description: descripcion || undefined,
-        images: [],
-      };
-    });
+    return {
+      id,
+      operacion,
+      tipo,
+      propietario_nombre,
+      propietario_celular: '',
+      distrito,
+      direccion,
+      area_m2,
+      precio_soles,
+      precio_usd_ref,
+      disponibilidad,
+      amoblado,
+      tags: [],
+      descripcion,
+      version: 1,
+      updated_at: new Date().toISOString()
+    };
+  });
 }
 
-/**
- * LEADS (flexible)
- * GoldLeads!A2:H
- */
-export function mapRowsToLeads(rows: Row[]): Lead[] {
-  return rows
-    .filter((r) => Array.isArray(r) && r.some((c) => s(c) !== ""))
-    .map((row, idx): Lead => {
-      const id = s(row[0]) || `lead-${idx + 2}`;
-      return {
-        id,
-        name: s(row[1]) || "Sin nombre",
-        phone: s(row[2]) || "",
-        email: s(row[3]) || undefined,
-        source: mapLeadSource(s(row[4])),
-        stage: mapLeadStage(s(row[5])),
-        propertyId: s(row[6]) || undefined,
-        notes: s(row[7]) || undefined,
-        createdAt: new Date().toISOString(),
-      };
-    });
+export function mapRowsToAppointments(rows: any[][]): Appointment[] {
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+  return rows.slice(1).map((r, i) => ({
+    id: clean(r[0]) || `CITA-${i + 1}`,
+    fecha: clean(r[1]),
+    hora: clean(r[2]),
+    estado: clean(r[3]) as any,
+    interesado_nombre: clean(r[4]),
+    interesado_celular: clean(r[5]),
+    propiedad_id: clean(r[6]),
+    nota: clean(r[7]),
+    notificado: clean(r[8]).toLowerCase() === 'si',
+    notificado_at: clean(r[9]),
+    version: 1
+  }));
 }
 
-/**
- * APPOINTMENTS (flexible)
- * Appointments!A2:I
- */
-export function mapRowsToAppointments(rows: Row[]): Appointment[] {
-  return rows
-    .filter((r) => Array.isArray(r) && r.some((c) => s(c) !== ""))
-    .map((row, idx): Appointment => {
-      const id = s(row[0]) || `apt-${idx + 2}`;
-      return {
-        id,
-        clientName: s(row[1]) || "Cliente",
-        phone: s(row[2]) || "",
-        propertyId: s(row[3]) || undefined,
-        date: s(row[4]) || "",
-        time: s(row[5]) || "",
-        status: mapAppointmentStatus(s(row[6])),
-        notes: s(row[7]) || undefined,
-        whatsappSent: s(row[8]).toLowerCase() === "true",
-      };
-    });
+export function mapRowsToLeads(rows: any[][]): Lead[] {
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+  return rows.slice(1).map((r, i) => ({
+    id: clean(r[0]) || `LEAD-${i + 1}`,
+    nombre: clean(r[1]),
+    celular: clean(r[2]),
+    interes: clean(r[3]) as any,
+    presupuesto: clean(r[4]),
+    estado: clean(r[5]) as any,
+    nota: clean(r[6]),
+    version: 1,
+    created_at: new Date().toISOString()
+  }));
 }

@@ -1,8 +1,20 @@
-import { google } from "googleapis";
+import { google } from 'googleapis';
 
-const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+/**
+ * Env vars supported:
+ * - Spreadsheet ID:
+ *   - GOOGLE_SHEETS_SPREADSHEET_ID (recommended)
+ *   - SHEET_ID (legacy)
+ *   - SPREADSHEET_ID (legacy)
+ *
+ * - Service Account:
+ *   - GOOGLE_SERVICE_ACCOUNT_JSON (recommended; full JSON as one line)
+ *   - GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY (legacy)
+ */
 
-function getSpreadsheetId() {
+let cachedSheets: ReturnType<typeof google.sheets> | null = null;
+
+function getSpreadsheetId(): string {
   const id =
     process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
     process.env.SHEET_ID ||
@@ -10,93 +22,64 @@ function getSpreadsheetId() {
 
   if (!id) {
     throw new Error(
-      "Missing GOOGLE_SHEETS_SPREADSHEET_ID (o SHEET_ID / SPREADSHEET_ID)."
+      'Missing spreadsheet id env. Set GOOGLE_SHEETS_SPREADSHEET_ID (or SHEET_ID).'
     );
   }
   return id;
 }
 
-function getServiceAccountFromEnv() {
-  const jsonRaw =
+function getServiceAccount(): { clientEmail: string; privateKey: string } {
+  const rawJson =
     process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
     process.env.GOOGLE_SERVICE_ACCOUNT;
 
-  if (jsonRaw) {
+  if (rawJson) {
+    let parsed: any;
     try {
-      const parsed = JSON.parse(jsonRaw);
-      // private_key viene con \n en env variables, lo normalizamos
-      if (parsed.private_key) {
-        parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
-      }
-      return parsed;
-    } catch (e) {
+      parsed = JSON.parse(rawJson);
+    } catch {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.');
+    }
+
+    const clientEmail = parsed?.client_email;
+    const privateKey = parsed?.private_key;
+
+    if (!clientEmail || !privateKey) {
       throw new Error(
-        "GOOGLE_SERVICE_ACCOUNT_JSON existe pero NO es JSON válido. Pégalo en 1 sola variable correctamente."
+        'Invalid service account JSON. Missing client_email and/or private_key.'
       );
     }
+
+    return { clientEmail, privateKey };
   }
 
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
 
   if (!clientEmail || !privateKey) {
     throw new Error(
-      "Missing credentials. Usa GOOGLE_SERVICE_ACCOUNT_JSON o GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY."
+      'Missing service account env. Set GOOGLE_SERVICE_ACCOUNT_JSON (recommended) or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.'
     );
   }
 
-  return { client_email: clientEmail, private_key: privateKey };
+  return { clientEmail, privateKey };
 }
 
-function getAuthClient() {
-  const spreadsheetId = getSpreadsheetId();
-  const sa = getServiceAccountFromEnv();
+export function getSheetsClient() {
+  if (cachedSheets) return cachedSheets;
+
+  const { clientEmail, privateKey } = getServiceAccount();
 
   const auth = new google.auth.JWT({
-    email: sa.client_email,
-    key: sa.private_key,
-    scopes: SCOPES,
+    email: clientEmail,
+    key: privateKey.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
   });
 
-  return { auth, spreadsheetId };
+  cachedSheets = google.sheets({ version: 'v4', auth });
+  return cachedSheets;
 }
 
-export async function getSheetData(range: string) {
-  const { auth, spreadsheetId } = getAuthClient();
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range,
-  });
-
-  return res.data.values ?? [];
-}
-
-export async function appendSheetRow(range: string, values: any[]) {
-  const { auth, spreadsheetId } = getAuthClient();
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const res = await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: [values] },
-  });
-
-  return res.data;
-}
-
-export async function updateSheetRow(range: string, values: any[]) {
-  const { auth, spreadsheetId } = getAuthClient();
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const res = await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: [values] },
-  });
-
-  return res.data;
+export function getSheetId() {
+  return getSpreadsheetId();
 }
