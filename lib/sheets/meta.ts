@@ -1,33 +1,24 @@
-import { getSheetData, updateSheetRow } from './client';
+import type { SheetSpec } from "./client";
 
-/**
- * Reads the last_change_ts from META!A2.
- * Returns null if empty or error.
- */
-export async function getMeta(): Promise<string | null> {
-  try {
-    const rows = await getSheetData('META!A2:A2');
-    if (rows && rows.length > 0 && rows[0].length > 0) {
-      return rows[0][0];
-    }
-    return null;
-  } catch (error) {
-    console.error("Error reading META:", error);
-    return null;
-  }
-}
+const env = (k: string) => process.env[k]?.trim();
+const DEFAULT_RANGE = "A1:ZZ";
 
-/**
- * Writes the current ISO timestamp to META!A2.
- * Returns the new timestamp.
- */
-export async function touchMeta(): Promise<string> {
-  const now = new Date().toISOString();
-  try {
-    await updateSheetRow('META!A2', [now]);
-    return now;
-  } catch (error) {
-    console.error("Error touching META:", error);
-    throw error;
-  }
-}
+export const SHEETS = {
+  properties: {
+    tab: env("SHEET_TAB_PROPERTIES"),
+    tabCandidates: ["Propiedades", "properties", "Inventario", "Inventory", "Hoja1", "Sheet1"],
+    range: env("SHEET_RANGE_PROPERTIES") || DEFAULT_RANGE,
+  } satisfies SheetSpec,
+
+  leads: {
+    tab: env("SHEET_TAB_LEADS"),
+    tabCandidates: ["Leads", "Clientes", "Prospectos", "Hoja2", "Sheet2"],
+    range: env("SHEET_RANGE_LEADS") || DEFAULT_RANGE,
+  } satisfies SheetSpec,
+
+  appointments: {
+    tab: env("SHEET_TAB_APPOINTMENTS"),
+    tabCandidates: ["Citas", "Agenda", "Appointments", "Hoja3", "Sheet3"],
+    range: env("SHEET_RANGE_APPOINTMENTS") || DEFAULT_RANGE,
+  } satisfies SheetSpec,
+} as const;

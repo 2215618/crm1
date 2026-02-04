@@ -1,143 +1,197 @@
-import { google } from "googleapis";
+import { google, sheets_v4 } from "googleapis";
 
-/**
- * Env vars soportadas:
- * - Spreadsheet ID:
- *   - GOOGLE_SHEETS_SPREADSHEET_ID (recomendado)
- *   - SHEET_ID (legacy)
- *   - SPREADSHEET_ID (legacy)
- *
- * - Service Account:
- *   - GOOGLE_SERVICE_ACCOUNT_JSON (recomendado; JSON completo)
- *   - GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY (legacy)
- */
+export type SheetSpec = {
+  tab?: string;                // nombre exacto de la pestaña (tab) en Google Sheets
+  tabCandidates?: string[];     // candidatos (si no sabes el nombre exacto)
+  range?: string;              // rango sin el tab, ej "A1:ZZ"
+};
 
-let cachedSheets: ReturnType<typeof google.sheets> | null = null;
+type CachedClient = {
+  sheets: sheets_v4.Sheets;
+  spreadsheetId: string;
+};
 
-function getSpreadsheetId(): string {
-  const id =
-    process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
+declare global {
+  // eslint-disable-next-line no-var
+  var __LG_SHEETS_CACHE__: CachedClient | undefined;
+}
+
+function requireEnv(name: string, value?: string) {
+  const v = value?.trim();
+  if (!v) throw new Error(`Missing env: ${name}`);
+  return v;
+}
+
+function getSpreadsheetId() {
+  return (
+    process.env.GOOGLE_SHEET_ID ||
+    process.env.GOOGLE_SPREADSHEET_ID ||
+    process.env.SPREADSHEET_ID ||
     process.env.SHEET_ID ||
-    process.env.SPREADSHEET_ID;
-
-  if (!id) {
-    throw new Error(
-      "Missing spreadsheet id env. Set GOOGLE_SHEETS_SPREADSHEET_ID (or SHEET_ID)."
-    );
-  }
-  return id;
+    ""
+  ).trim();
 }
 
-function getServiceAccount(): { clientEmail: string; privateKey: string } {
-  const rawJson =
-    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-    process.env.GOOGLE_SERVICE_ACCOUNT;
-
-  if (rawJson) {
-    let parsed: any;
-    try {
-      parsed = JSON.parse(rawJson);
-    } catch {
-      throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.");
-    }
-
-    const clientEmail = parsed?.client_email;
-    const privateKey = parsed?.private_key;
-
-    if (!clientEmail || !privateKey) {
-      throw new Error(
-        "Invalid service account JSON. Missing client_email and/or private_key."
-      );
-    }
-
-    return { clientEmail, privateKey };
-  }
-
-  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
-
-  if (!clientEmail || !privateKey) {
-    throw new Error(
-      "Missing service account env. Set GOOGLE_SERVICE_ACCOUNT_JSON (recommended) or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY."
-    );
-  }
-
-  return { clientEmail, privateKey };
+function getClientEmail() {
+  return (
+    process.env.GOOGLE_CLIENT_EMAIL ||
+    process.env.GCP_CLIENT_EMAIL ||
+    process.env.CLIENT_EMAIL ||
+    ""
+  ).trim();
 }
 
-export function getSheetsClient() {
-  if (cachedSheets) return cachedSheets;
+function getPrivateKey() {
+  const raw =
+    process.env.GOOGLE_PRIVATE_KEY ||
+    process.env.GCP_PRIVATE_KEY ||
+    process.env.PRIVATE_KEY ||
+    "";
+  return raw.replace(/\\n/g, "\n").trim();
+}
 
-  const { clientEmail, privateKey } = getServiceAccount();
+function normalizeTitle(s: string) {
+  return s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function quoteSheetTitle(title: string) {
+  const safe = title.replace(/'/g, "''");
+  return `'${safe}'`;
+}
+
+export function getSheetsClient(): CachedClient {
+  if (globalThis.__LG_SHEETS_CACHE__) return globalThis.__LG_SHEETS_CACHE__;
+
+  const spreadsheetId = requireEnv(
+    "GOOGLE_SHEET_ID (o GOOGLE_SPREADSHEET_ID/SPREADSHEET_ID/SHEET_ID)",
+    getSpreadsheetId() || undefined
+  );
+
+  const clientEmail = requireEnv("GOOGLE_CLIENT_EMAIL", getClientEmail() || undefined);
+  const privateKey = requireEnv("GOOGLE_PRIVATE_KEY", getPrivateKey() || undefined);
 
   const auth = new google.auth.JWT({
     email: clientEmail,
-    key: privateKey.replace(/\\n/g, "\n"),
+    key: privateKey,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
-  cachedSheets = google.sheets({ version: "v4", auth });
-  return cachedSheets;
+  const sheets = google.sheets({ version: "v4", auth });
+
+  globalThis.__LG_SHEETS_CACHE__ = { sheets, spreadsheetId };
+  return globalThis.__LG_SHEETS_CACHE__;
 }
 
-export function getSheetId() {
-  return getSpreadsheetId();
-}
-
-/** Lee valores crudos 2D desde una pestaña */
-export async function getSheetData(
-  sheetName: string,
-  range: string = "A:Z"
-): Promise<any[][]> {
-  const sheets = getSheetsClient();
-  const spreadsheetId = getSpreadsheetId();
-
-  const res = await sheets.spreadsheets.values.get({
+export async function listSheetTitles(): Promise<string[]> {
+  const { sheets, spreadsheetId } = getSheetsClient();
+  const res = await sheets.spreadsheets.get({
     spreadsheetId,
-    range: `${sheetName}!${range}`,
+    fields: "sheets(properties(title))",
   });
 
-  return (res.data.values ?? []) as any[][];
+  return (
+    res.data.sheets
+      ?.map((s) => s.properties?.title)
+      .filter((t): t is string => !!t) ?? []
+  );
 }
 
-/** Agrega una fila al final */
+export async function resolveSheetTitle(spec: SheetSpec): Promise<string> {
+  if (spec.tab?.trim()) return spec.tab.trim();
+
+  const titles = await listSheetTitles();
+  if (!titles.length) throw new Error("Spreadsheet has no sheets/tabs");
+
+  const candidates = (spec.tabCandidates ?? []).map((c) => c.trim()).filter(Boolean);
+  if (!candidates.length) return titles[0];
+
+  const byNorm = new Map(titles.map((t) => [normalizeTitle(t), t]));
+  for (const c of candidates) {
+    const hit = byNorm.get(normalizeTitle(c));
+    if (hit) return hit;
+  }
+
+  // parcial
+  for (const t of titles) {
+    const nt = normalizeTitle(t);
+    if (candidates.some((c) => nt.includes(normalizeTitle(c)))) return t;
+  }
+
+  return titles[0];
+}
+
+export async function getSheetData(spec: SheetSpec): Promise<string[][]> {
+  const { sheets, spreadsheetId } = getSheetsClient();
+  const title = await resolveSheetTitle(spec);
+  const range = spec.range?.trim() || "A1:ZZ";
+
+  const a1 = `${quoteSheetTitle(title)}!${range}`;
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: a1,
+    majorDimension: "ROWS",
+  });
+
+  const values = res.data.values ?? [];
+  return values.map((row) => row.map((cell) => (cell ?? "").toString()));
+}
+
+function colToA1(colIndex: number) {
+  let n = colIndex + 1;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
 export async function appendSheetRow(
-  sheetName: string,
-  row: any[],
-  range: string = "A:Z"
+  spec: SheetSpec,
+  row: (string | number | boolean | null)[]
 ) {
-  const sheets = getSheetsClient();
-  const spreadsheetId = getSpreadsheetId();
+  const { sheets, spreadsheetId } = getSheetsClient();
+  const title = await resolveSheetTitle(spec);
+  const range = `${quoteSheetTitle(title)}!A:ZZ`;
 
   await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${sheetName}!${range}`,
+    range,
     valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
     requestBody: { values: [row] },
   });
 }
 
-/** Actualiza una fila por número (1-based). Escribe desde A hasta la longitud del array */
 export async function updateSheetRow(
-  sheetName: string,
-  rowNumber: number,
-  values: any[]
+  spec: SheetSpec,
+  rowIndex1Based: number,
+  row: (string | number | boolean | null)[]
 ) {
-  const sheets = getSheetsClient();
-  const spreadsheetId = getSpreadsheetId();
+  const { sheets, spreadsheetId } = getSheetsClient();
+  const title = await resolveSheetTitle(spec);
 
-  const colStart = "A";
-  const colEnd =
-    values.length <= 26
-      ? String.fromCharCode("A".charCodeAt(0) + values.length - 1)
-      : "Z";
-
-  const range = `${sheetName}!${colStart}${rowNumber}:${colEnd}${rowNumber}`;
+  const lastCol = colToA1(Math.max(0, row.length - 1));
+  const range = `${quoteSheetTitle(title)}!A${rowIndex1Based}:${lastCol}${rowIndex1Based}`;
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range,
     valueInputOption: "USER_ENTERED",
-    requestBody: { values: [values] },
+    requestBody: { values: [row] },
   });
+}
+
+export async function getSpreadsheetMeta() {
+  const { sheets, spreadsheetId } = getSheetsClient();
+  const res = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "spreadsheetId,properties(title),sheets(properties(sheetId,title,index))",
+  });
+  return res.data;
 }

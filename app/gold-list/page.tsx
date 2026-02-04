@@ -1,70 +1,133 @@
 "use client";
 
-import React from 'react';
-import AppShell from "@/components/AppShell";
-import TopHeader from "@/components/TopHeader";
-import { useQuery } from "@tanstack/react-query";
-import { Lead } from "@/types";
+import { useEffect, useMemo, useState } from "react";
+
+type Lead = {
+  id: string;
+  nombre?: string;
+  telefono?: string;
+  celular?: string;
+  estado?: string;
+  prioridad?: string;
+  fuente?: string;
+  fecha?: string;
+  notas?: string;
+};
+
+async function safeFetchArray<T>(url: string): Promise<T[]> {
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json().catch(() => null);
+
+    // Si el API falla o devuelve algo raro, SIEMPRE devolvemos []
+    if (!res.ok) return [];
+    if (Array.isArray(data)) return data as T[];
+    if (data && Array.isArray((data as any).data)) return (data as any).data as T[];
+    return [];
+  } catch {
+    return [];
+  }
+}
 
 export default function GoldListPage() {
-  const { data: leads } = useQuery<Lead[]>({
-    queryKey: ["leads"],
-    queryFn: () => fetch("/api/leads").then(res => res.json())
-  });
+  const [loading, setLoading] = useState(true);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [q, setQ] = useState("");
 
-  const columns = [
-    { title: 'Nuevo', color: 'bg-blue-500', status: 'Nuevo' },
-    { title: 'Contactado', color: 'bg-yellow-400', status: 'Contactado' },
-    { title: 'Caliente', color: 'bg-orange-500', status: 'Caliente' },
-    { title: 'Cerrado', color: 'bg-green-500', status: 'Cerrado' }
-  ];
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true);
+      const arr = await safeFetchArray<Lead>("/api/leads");
+      if (alive) {
+        setLeads(Array.isArray(arr) ? arr : []);
+        setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const goldLeads = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    const base = Array.isArray(leads) ? leads : [];
+
+    const onlyGold = base.filter((l) => {
+      const st = (l.estado || "").toLowerCase();
+      return st === "dorado" || st === "gold" || st === "lista dorada";
+    });
+
+    if (!query) return onlyGold;
+
+    return onlyGold.filter((l) => {
+      const nombre = (l.nombre || "").toLowerCase();
+      const tel = (l.telefono || l.celular || "").toLowerCase();
+      const notas = (l.notas || "").toLowerCase();
+      return nombre.includes(query) || tel.includes(query) || notas.includes(query);
+    });
+  }, [leads, q]);
 
   return (
-    <AppShell>
-      <TopHeader title="Lista Dorada" />
-      <div className="flex-1 overflow-x-auto kanban-scroll p-6 bg-background-light dark:bg-background-dark">
-        <div className="flex h-full gap-6 min-w-full">
-          {columns.map((col, i) => {
-             const colLeads = leads?.filter(l => l.estado === col.status) || [];
-             return (
-              <div key={i} className="flex flex-col w-[320px] shrink-0">
-                <div className="flex items-center justify-between mb-4 px-1">
-                  <div className="flex items-center gap-2">
-                    <div className={`size-2 rounded-full ${col.color}`}></div>
-                    <h3 className="font-bold">{col.title}</h3>
-                    <span className="bg-slate-100 dark:bg-slate-800 text-slate-500 text-xs font-bold px-2 py-0.5 rounded-full">{colLeads.length}</span>
-                  </div>
-                  <button className="text-slate-400 hover:text-primary"><span className="material-symbols-outlined">add</span></button>
-                </div>
-                <div className="flex-1 flex flex-col gap-3">
-                  {colLeads.map((card, j) => (
-                    <div key={card.id} className="group relative flex flex-col bg-white dark:bg-[#1a2234] rounded-xl p-4 shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="flex items-center gap-3">
-                           <div className="size-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-xs">{card.nombre.charAt(0)}</div>
-                          <div>
-                            <h4 className="text-sm font-bold leading-tight">{card.nombre}</h4>
-                            <p className="text-[10px] text-slate-400 font-medium">{card.celular}</p>
-                          </div>
-                        </div>
-                        <span className="bg-blue-50 text-blue-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase">{card.interes}</span>
-                      </div>
-                      <p className="font-bold text-sm mb-1">{card.presupuesto}</p>
-                      <button className="w-full py-1.5 bg-green-50 text-green-700 text-xs font-bold rounded-lg transition-colors mt-2">WhatsApp</button>
-                    </div>
-                  ))}
-                  {colLeads.length === 0 && (
-                    <div className="flex flex-col items-center justify-center text-center p-8 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-700 h-48 opacity-50">
-                      <span className="material-symbols-outlined text-slate-400 mb-2">inbox</span>
-                      <p className="text-xs">Sin registros</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+    <div className="p-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-semibold">Lista Dorada</h1>
+          <p className="text-sm text-slate-500">
+            Esta vista ya no se cae aunque el API falle. Si no ves datos, revisa tu Google Sheet.
+          </p>
+        </div>
+
+        <div className="w-full sm:w-[360px]">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar por nombre / teléfono / notas..."
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 outline-none focus:ring-2 focus:ring-slate-200"
+          />
         </div>
       </div>
-    </AppShell>
+
+      <div className="mt-6">
+        {loading ? (
+          <div className="text-slate-500">Cargando leads...</div>
+        ) : goldLeads.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 p-4 text-slate-600">
+            No hay leads en <b>estado = Dorado</b> (o el Sheet aún no está conectado).<br />
+            Prueba abrir: <code className="text-xs">/api/health</code> para validar conexión.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {goldLeads.map((l) => (
+              <div key={l.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{l.nombre || "Sin nombre"}</div>
+                    <div className="text-sm text-slate-600 truncate">
+                      {(l.telefono || l.celular) ? `📞 ${l.telefono || l.celular}` : "📞 (sin teléfono)"}
+                    </div>
+                  </div>
+                  <span className="text-xs rounded-full bg-amber-100 text-amber-800 px-2 py-1">
+                    {l.estado || "Dorado"}
+                  </span>
+                </div>
+
+                <div className="mt-3 text-sm text-slate-700 space-y-1">
+                  <div><b>Prioridad:</b> {l.prioridad || "Media"}</div>
+                  <div><b>Fuente:</b> {l.fuente || "Sheets"}</div>
+                  {l.fecha ? <div><b>Fecha:</b> {l.fecha}</div> : null}
+                </div>
+
+                {l.notas ? (
+                  <div className="mt-3 text-sm text-slate-600 line-clamp-3">
+                    <b>Notas:</b> {l.notas}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

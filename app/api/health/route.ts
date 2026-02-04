@@ -1,36 +1,22 @@
-import { NextResponse } from 'next/server';
-import { getSheetData } from '@/lib/sheets/client';
+import { NextResponse } from "next/server";
+import { getSpreadsheetMeta, listSheetTitles } from "@/lib/sheets/client";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const envCheck = {
-    hasSheetId: !!process.env.SHEET_ID,
-    hasEmail: !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    hasKey: !!process.env.GOOGLE_PRIVATE_KEY,
-  };
-
-  if (!envCheck.hasSheetId || !envCheck.hasEmail || !envCheck.hasKey) {
-    return NextResponse.json({ 
-      ok: false, 
-      status: 'Missing environment variables',
-      details: envCheck 
-    }, { status: 500 });
-  }
-
   try {
-    // Attempt to read META headers and value
-    const data = await getSheetData('META!A1:A2');
-    return NextResponse.json({ 
-      ok: true, 
-      status: 'Connected to Google Sheets',
-      dataPreview: data 
+    const titles = await listSheetTitles();
+    const meta = await getSpreadsheetMeta();
+    return NextResponse.json({
+      ok: true,
+      spreadsheetId: meta.spreadsheetId,
+      title: meta.properties?.title,
+      sheetTitles: titles,
     });
-  } catch (error: any) {
-    return NextResponse.json({ 
-      ok: false, 
-      status: 'Connection failed',
-      error: error.message 
-    }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json({
+      ok: false,
+      error: err?.message || String(err),
+    });
   }
 }
