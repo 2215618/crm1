@@ -1,110 +1,188 @@
-"use client";
+'use client';
 
-import React from 'react';
-import AppShell from "@/components/AppShell";
-import TopHeader from "@/components/TopHeader";
-import { useQuery } from "@tanstack/react-query";
-import { Property, Appointment } from "@/types";
-import { useRouter } from "next/navigation";
+import { useQuery } from '@tanstack/react-query';
+import {
+  Calendar,
+  CheckCircle2,
+  Clock,
+  DollarSign,
+  Home,
+  Phone,
+  Star,
+  Users,
+} from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import type { Appointment, Lead, Property } from '@/types';
+
+const fetchArray = async <T,>(url: string): Promise<T[]> => {
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json) ? (json as T[]) : [];
+  } catch {
+    return [];
+  }
+};
 
 export default function DashboardPage() {
-  const router = useRouter();
-
-  const { data: properties } = useQuery<Property[]>({
-    queryKey: ["properties"],
-    queryFn: () => fetch("/api/properties").then(res => res.json())
+  const {
+    data: properties = [],
+    isLoading: propertiesLoading,
+    isError: propertiesError,
+  } = useQuery({
+    queryKey: ['properties'],
+    queryFn: () => fetchArray<Property>('/api/properties'),
+    retry: 0,
   });
 
-  const { data: appointments } = useQuery<Appointment[]>({
-    queryKey: ["appointments"],
-    queryFn: () => fetch("/api/appointments").then(res => res.json())
+  const {
+    data: appointments = [],
+    isLoading: appointmentsLoading,
+    isError: appointmentsError,
+  } = useQuery({
+    queryKey: ['appointments'],
+    queryFn: () => fetchArray<Appointment>('/api/appointments'),
+    retry: 0,
   });
 
-  const available = properties?.filter(p => p.disponibilidad === 'Disponible').length || 0;
-  const reserved = properties?.filter(p => p.disponibilidad === 'Reservado').length || 0;
-  const total = properties?.length || 0;
-  const percentage = total > 0 ? Math.round((available / total) * 100) : 0;
-  
-  const todayAppointments = appointments?.filter(a => a.fecha === new Date().toISOString().split('T')[0]).length || 0;
+  const {
+    data: leads = [],
+    isLoading: leadsLoading,
+    isError: leadsError,
+  } = useQuery({
+    queryKey: ['leads'],
+    queryFn: () => fetchArray<Lead>('/api/leads'),
+    retry: 0,
+  });
+
+  const totalProperties = properties.length;
+  const availableProperties = properties.filter((p) => p.status === 'Disponible').length;
+  const reservedProperties = properties.filter((p) => p.status === 'Reservado').length;
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const todaysAppointments = appointments.filter((a) => String(a.date).slice(0, 10) === todayISO);
+
+  const hotLeads = leads.filter((l) => l.stage === 'Caliente');
+
+  const inventoryProgress = totalProperties > 0 ? (availableProperties / totalProperties) * 100 : 0;
+
+  const anyApiError = propertiesError || appointmentsError || leadsError;
+  const anyLoading = propertiesLoading || appointmentsLoading || leadsLoading;
 
   return (
-    <AppShell>
-      <TopHeader title="Dashboard Action Center" showSearch={false} />
-      <div className="flex-1 overflow-y-auto p-6 lg:p-8">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 max-w-[1920px] mx-auto pb-8">
-          
-          {/* Inventory Stats */}
-          <div className="col-span-12 md:col-span-6 xl:col-span-4 bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-border-light dark:border-border-dark shadow-subtle flex flex-col justify-between h-48 relative overflow-hidden group">
-            <div className="flex justify-between items-start z-10">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Estado de Inventario</h3>
-                <p className="text-xs text-slate-500 mt-1">{total} propiedades totales</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-6 mt-2 z-10">
-              <div className="relative size-20 shrink-0">
-                <svg className="size-full -rotate-90 transform group-hover:scale-105 transition-transform duration-500" viewBox="0 0 36 36">
-                  <circle cx="18" cy="18" r="16" fill="none" className="text-gray-100 dark:text-gray-800" stroke="currentColor" strokeWidth="4" />
-                  <circle cx="18" cy="18" r="16" fill="none" className="text-primary" stroke="currentColor" strokeWidth="4" strokeDasharray={`${percentage}, 100`} strokeLinecap="round" />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center flex-col">
-                  <span className="text-xs font-bold text-slate-400">{percentage}%</span>
-                </div>
-              </div>
-              <div className="flex flex-col gap-2 flex-1">
-                <div className="flex justify-between items-center text-sm border-b border-dashed border-gray-100 dark:border-gray-800 pb-1">
-                  <span className="text-slate-600 dark:text-slate-300 text-xs font-medium">Disponibles</span>
-                  <span className="font-bold text-slate-900 dark:text-white text-xs">{available}</span>
-                </div>
-                <div className="flex justify-between items-center text-sm pb-1">
-                  <span className="text-slate-600 dark:text-slate-300 text-xs font-medium">Reservadas</span>
-                  <span className="font-bold text-slate-900 dark:text-white text-xs">{reserved}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Agenda Stats */}
-          <div className="col-span-12 md:col-span-6 xl:col-span-4 bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-border-light dark:border-border-dark shadow-subtle flex flex-col justify-between h-48 relative overflow-hidden">
-            <div className="flex justify-between items-start z-10">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                <span className="material-symbols-outlined text-primary text-[18px]">calendar_today</span>
-                Agenda de Hoy
-              </h3>
-            </div>
-            <div className="flex items-end justify-between z-10 mb-1">
-              <div className="flex flex-col">
-                <span className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">{todayAppointments}</span>
-                <span className="text-xs text-slate-500 font-medium mt-1">Citas programadas</span>
-              </div>
-              <button onClick={() => router.push('/appointments')} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 px-4 py-2 rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-slate-200 dark:shadow-none">
-                Ver Agenda
-                <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-              </button>
-            </div>
-          </div>
-
-           {/* Quick Action - Leads */}
-           <div className="col-span-12 md:col-span-12 xl:col-span-4 bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-border-light dark:border-border-dark shadow-subtle flex flex-col justify-between h-48 relative overflow-hidden">
-             <div className="flex justify-between items-start z-10">
-               <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                 <span className="material-symbols-outlined text-red-500 text-[18px]">local_fire_department</span>
-                 Leads Calientes
-               </h3>
-             </div>
-             <div className="flex items-center gap-4 z-10 mt-2">
-               <div className="flex-1">
-                 <span className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">3</span>
-                 <div className="flex items-center gap-1 mt-1">
-                   <span className="text-xs text-green-600 font-bold">+1 nuevo</span>
-                 </div>
-               </div>
-               <button onClick={() => router.push('/gold-list')} className="w-full max-w-[120px] bg-primary text-white text-[12px] font-bold py-2 rounded-lg">Ver Leads</button>
-             </div>
-           </div>
-
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard Action Center</h1>
+          <p className="text-muted-foreground">Resumen general y acciones rápidas</p>
         </div>
       </div>
-    </AppShell>
-  );
-}
+
+      {anyApiError && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          No se pudo cargar la data de Sheets (API). Revisa variables de entorno en Vercel y vuelve a desplegar.
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <Card className="bg-white">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Estado de Inventario</CardTitle>
+            <Home className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center space-x-4">
+              <div className="relative h-16 w-16">
+                <div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-muted">
+                  <span className="text-sm font-bold">{Math.round(inventoryProgress)}%</span>
+                </div>
+              </div>
+              <div className="flex-1 space-y-1">
+                <p className="text-sm text-muted-foreground">{totalProperties} propiedades totales</p>
+                <Progress value={inventoryProgress} className="h-2" />
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              <div className="flex items-center">
+                <div className="mr-2 h-2 w-2 rounded-full bg-green-500" />
+                <span>Disponibles</span>
+                <span className="ml-auto font-medium">{availableProperties}</span>
+              </div>
+              <div className="flex items-center">
+                <div className="mr-2 h-2 w-2 rounded-full bg-yellow-500" />
+                <span>Reservadas</span>
+                <span className="ml-auto font-medium">{reservedProperties}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Agenda de Hoy</CardTitle>
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{todaysAppointments.length}</div>
+            <p className="text-xs text-muted-foreground">Citas programadas</p>
+            <div className="mt-4 flex items-center justify-between">
+              <Button variant="outline" size="sm" className="w-full justify-between" asChild>
+                <a href="/appointments">
+                  Ver Agenda <span>→</span>
+                </a>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-white">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Leads Calientes</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{hotLeads.length}</div>
+            <p className="text-xs text-muted-foreground">
+              {leads.length > 0 ? `+${Math.max(0, leads.filter(l => l.stage === 'Nuevo').length)} nuevo` : 'Sin datos aún'}
+            </p>
+            <div className="mt-4">
+              <Button size="sm" className="w-full" asChild>
+                <a href="/gold-list">Ver Leads</a>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="bg-white">
+          <CardHeader>
+            <CardTitle className="text-lg">Acciones Prioritarias</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-start space-x-3 rounded-lg border p-3">
+                <div className="mt-0.5 rounded-full bg-green-100 p-1">
+                  <Phone className="h-4 w-4 text-green-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium">Seguimiento Leads</p>
+                  <p className="text-sm text-muted-foreground">Revisar y contactar leads pendientes</p>
+                  <Button variant="outline" size="sm" className="mt-2" asChild>
+                    <a href="/gold-list">Ir a Lista Dorada</a>
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex items-start space-x-3 rounded-lg border p-3">
+                <div className="mt-0.5 rounded-full bg-blue-100 p-1">
+                  <Clock className="h-4 w-4 text-blue-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium">Citas de Hoy</p>
+                  <p className="text-sm text-muted-foreground">Confirmar citas y enviar WhatsApp</p>
+                  <Button variant="outline" size="sm" className="mt
