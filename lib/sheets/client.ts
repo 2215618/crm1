@@ -1,85 +1,121 @@
-import { google } from 'googleapis';
-
-/**
- * Env vars supported:
- * - Spreadsheet ID:
- *   - GOOGLE_SHEETS_SPREADSHEET_ID (recommended)
- *   - SHEET_ID (legacy)
- *   - SPREADSHEET_ID (legacy)
- *
- * - Service Account:
- *   - GOOGLE_SERVICE_ACCOUNT_JSON (recommended; full JSON as one line)
- *   - GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY (legacy)
- */
+// lib/sheets/client.ts
+import { google } from "googleapis";
 
 let cachedSheets: ReturnType<typeof google.sheets> | null = null;
 
-function getSpreadsheetId(): string {
-  const id =
-    process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
-    process.env.SHEET_ID ||
-    process.env.SPREADSHEET_ID;
+function normalizePrivateKey(key: string) {
+  // Soporta keys pegadas como JSON con \\n
+  return key.replace(/\\n/g, "\n");
+}
 
-  if (!id) {
-    throw new Error(
-      'Missing spreadsheet id env. Set GOOGLE_SHEETS_SPREADSHEET_ID (or SHEET_ID).'
-    );
-  }
+function getSpreadsheetId() {
+  const id = process.env.SHEET_ID;
+  if (!id) throw new Error("Missing env SHEET_ID");
   return id;
 }
 
-function getServiceAccount(): { clientEmail: string; privateKey: string } {
-  const rawJson =
-    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-    process.env.GOOGLE_SERVICE_ACCOUNT;
-
-  if (rawJson) {
-    let parsed: any;
-    try {
-      parsed = JSON.parse(rawJson);
-    } catch {
-      throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.');
+function getServiceAccountCredentials() {
+  // Opción A: JSON completo (si lo usas)
+  const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  if (json) {
+    const parsed = JSON.parse(json);
+    if (!parsed.client_email || !parsed.private_key) {
+      throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is missing client_email/private_key");
     }
-
-    const clientEmail = parsed?.client_email;
-    const privateKey = parsed?.private_key;
-
-    if (!clientEmail || !privateKey) {
-      throw new Error(
-        'Invalid service account JSON. Missing client_email and/or private_key.'
-      );
-    }
-
-    return { clientEmail, privateKey };
+    return {
+      client_email: String(parsed.client_email),
+      private_key: normalizePrivateKey(String(parsed.private_key)),
+    };
   }
 
-  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  // Opción B: variables separadas (lo más común en Vercel)
+  const email =
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ||
+    process.env.GOOGLE_CLIENT_EMAIL;
 
-  if (!clientEmail || !privateKey) {
-    throw new Error(
-      'Missing service account env. Set GOOGLE_SERVICE_ACCOUNT_JSON (recommended) or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY.'
-    );
-  }
+  const privateKeyRaw =
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ||
+    process.env.GOOGLE_PRIVATE_KEY ||
+    process.env.GOOGLE_PRIVATE_KEY_ID; // (por si alguien lo puso mal, igual lo intentamos)
 
-  return { clientEmail, privateKey };
+  if (!email) throw new Error("Missing env GOOGLE_SERVICE_ACCOUNT_EMAIL (or GOOGLE_CLIENT_EMAIL)");
+  if (!privateKeyRaw) throw new Error("Missing env GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY (or GOOGLE_PRIVATE_KEY)");
+
+  return {
+    client_email: email,
+    private_key: normalizePrivateKey(privateKeyRaw),
+  };
 }
 
 export function getSheetsClient() {
   if (cachedSheets) return cachedSheets;
 
-  const { clientEmail, privateKey } = getServiceAccount();
+  const { client_email, private_key } = getServiceAccountCredentials();
 
   const auth = new google.auth.JWT({
-    email: clientEmail,
-    key: privateKey.replace(/\\n/g, '\n'),
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    email: client_email,
+    key: private_key,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
-  cachedSheets = google.sheets({ version: 'v4', auth });
+  cachedSheets = google.sheets({ version: "v4", auth });
   return cachedSheets;
 }
 
+// Útil si en algún lado lo usas directamente
 export function getSheetId() {
   return getSpreadsheetId();
+}
+
+/**
+ * Lee datos de Google Sheets.
+ * range ejemplo: "Properties!A2:Q"  o  "Appointments!A2:H"
+ */
+export async function getSheetData(range: string) {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range,
+  });
+
+  return res.data.values ?? [];
+}
+
+/**
+ * Actualiza un rango específico.
+ * range ejemplo: "Properties!A10:Q10"
+ */
+export async function updateSheetRow(range: string, values: any[][]) {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values },
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Inserta una nueva fila al final.
+ * range ejemplo: "Properties!A:Q"
+ */
+export async function appendSheetRow(range: string, values: any[][]) {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
+
+  const res = await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values },
+  });
+
+  return res.data;
 }
