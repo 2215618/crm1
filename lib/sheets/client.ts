@@ -1,158 +1,142 @@
+import "server-only";
 import { google } from "googleapis";
+import type { sheets_v4 } from "googleapis";
 
-/**
- * Env vars requeridas:
- * - SHEET_ID
- * - GOOGLE_SERVICE_ACCOUNT_EMAIL
- * - GOOGLE_PRIVATE_KEY  (con \n, se normaliza)
- *
- * Opcional (compat):
- * - GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
- */
-const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
+let cachedClient: sheets_v4.Sheets | null = null;
 
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v || !v.trim()) throw new Error(`Missing env var: ${name}`);
-  return v;
+function normalizePrivateKey(key?: string) {
+  if (!key) return "";
+  // Vercel a veces guarda saltos como \n literales
+  return key.includes("\\n") ? key.replace(/\\n/g, "\n") : key;
 }
 
-export function requireSheetId(): string {
-  return requireEnv("SHEET_ID");
+export function getSheetId(): string {
+  return process.env.SHEET_ID ?? "";
 }
 
-export function requireServiceAccountEmail(): string {
-  return requireEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL");
+export async function getSheetsClient(): Promise<sheets_v4.Sheets> {
+  if (cachedClient) return cachedClient;
+
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+
+  if (!clientEmail) throw new Error("Missing env: GOOGLE_SERVICE_ACCOUNT_EMAIL");
+  if (!privateKeyRaw) throw new Error("Missing env: GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY");
+
+  const auth = new google.auth.JWT({
+    email: clientEmail,
+    key: normalizePrivateKey(privateKeyRaw),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+
+  cachedClient = google.sheets({ version: "v4", auth });
+  return cachedClient;
 }
 
-export function requirePrivateKey(): string {
-  const raw =
-    process.env.GOOGLE_PRIVATE_KEY ??
-    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ??
-    "";
-  if (!raw || !raw.trim()) {
-    throw new Error(
-      "Missing env var: GOOGLE_PRIVATE_KEY (or GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY)"
-    );
+function colLetter(n: number) {
+  // 1 -> A, 26 -> Z, 27 -> AA ...
+  let s = "";
+  while (n > 0) {
+    const m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = Math.floor((n - 1) / 26);
   }
-  // Vercel suele guardar el key con \n literales
-  return raw.replace(/\\n/g, "\n");
-}
-
-let cachedAuth: any | null = null;
-export function getGoogleAuth() {
-  if (cachedAuth) return cachedAuth;
-
-  cachedAuth = new google.auth.JWT({
-    email: requireServiceAccountEmail(),
-    key: requirePrivateKey(),
-    scopes: SCOPES,
-  });
-
-  return cachedAuth;
-}
-
-let cachedSheets: any | null = null;
-export function getSheets() {
-  if (cachedSheets) return cachedSheets;
-
-  cachedSheets = google.sheets({
-    version: "v4",
-    auth: getGoogleAuth(),
-  });
-
-  return cachedSheets;
+  return s || "A";
 }
 
 /**
- * Devuelve los valores como matriz (rows).
- * Acepta:
- * - getSheetData("Properties")  -> usa "A:Z"
- * - getSheetData("Properties", "A1:Z999")
- * - getSheetData("Properties!A1:Z999") (si ya viene con "!")
+ * Export compatible con lo que tus rutas y meta.ts están importando.
+ * Uso típico:
+ *   const values = await getSheetData("Properties");
+ *   const values = await getSheetData("Properties", "A:ZZ");
+ *   const values = await getSheetData("Properties", "Properties!A:ZZ");
  */
-export async function getSheetData(
-  sheetNameOrRange: string,
-  a1Range: string = "A:Z"
-): Promise<string[][]> {
-  const sheets = getSheets();
-  const spreadsheetId = requireSheetId();
+export async function getSheetData(...args: any[]): Promise<any[][]> {
+  const sheetName = String(args?.[0] ?? "");
+  if (!sheetName) throw new Error("getSheetData: missing sheetName");
 
-  const range = sheetNameOrRange.includes("!")
-    ? sheetNameOrRange
-    : `${sheetNameOrRange}!${a1Range}`;
+  const spreadsheetId = getSheetId();
+  if (!spreadsheetId) throw new Error("Missing env: SHEET_ID");
+
+  const sheets = await getSheetsClient();
+
+  let range = args?.[1] ? String(args[1]) : `${sheetName}!A:ZZ`;
+  // Si te pasan "A:ZZ" lo convertimos a "Sheet!A:ZZ"
+  if (!range.includes("!")) range = `${sheetName}!${range}`;
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range,
+    valueRenderOption: "UNFORMATTED_VALUE",
+    dateTimeRenderOption: "FORMATTED_STRING",
   });
 
-  return (res?.data?.values as string[][]) ?? [];
+  return (res.data.values as any[][]) ?? [];
 }
 
 /**
- * Agrega una fila al final.
+ * Export compatible con lo que meta.ts está importando.
+ *
+ * Soporta 3 modos comunes:
+ * 1) updateSheetRow("META", 2, ["a","b","c"])
+ * 2) updateSheetRow("META", 2, { col1:"x", col2:"y" })   // mapea por headers (fila 1)
+ * 3) updateSheetRow("META!A2:Z2", [["a","b"]])
  */
-export async function appendSheetRow(
-  sheetName: string,
-  values: any[],
-  valueInputOption: "RAW" | "USER_ENTERED" = "USER_ENTERED"
-) {
-  const sheets = getSheets();
-  const spreadsheetId = requireSheetId();
+export async function updateSheetRow(...args: any[]): Promise<void> {
+  const spreadsheetId = getSheetId();
+  if (!spreadsheetId) throw new Error("Missing env: SHEET_ID");
 
-  const res = await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${sheetName}!A:Z`,
-    valueInputOption,
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: [values] },
-  });
+  const sheets = await getSheetsClient();
 
-  return res?.data;
-}
+  let range = "";
+  let values: any[][] = [];
 
-function colToA1(n: number): string {
-  let s = "";
-  let x = n;
-  while (x > 0) {
-    const mod = (x - 1) % 26;
-    s = String.fromCharCode(65 + mod) + s;
-    x = Math.floor((x - 1) / 26);
+  // Modo 3: (rangeA1, values)
+  if (typeof args?.[0] === "string" && args[0].includes("!") && args.length >= 2) {
+    range = String(args[0]);
+    const v = args[1];
+    values = Array.isArray(v?.[0]) ? v : [v];
+  } else {
+    // Modo 1/2: (sheetName, rowNumber, rowValues|object)
+    const sheetName = String(args?.[0] ?? "");
+    const rowNumber = Number(args?.[1]);
+    const rowData = args?.[2];
+
+    if (!sheetName) throw new Error("updateSheetRow: missing sheetName");
+    if (!Number.isFinite(rowNumber) || rowNumber <= 0) {
+      throw new Error("updateSheetRow: invalid rowNumber");
+    }
+
+    // Si es array: update directo desde A{row}
+    if (Array.isArray(rowData)) {
+      values = [rowData];
+      range = `${sheetName}!A${rowNumber}`;
+    } else if (rowData && typeof rowData === "object") {
+      // Si es objeto: mapeo por headers en la fila 1
+      const headerRows = await getSheetData(sheetName, `${sheetName}!1:1`);
+      const headers = (headerRows?.[0] ?? []).map((h: any) => String(h).trim());
+
+      if (!headers.length) throw new Error(`updateSheetRow: no headers found in ${sheetName} row 1`);
+
+      const rowValues = new Array(headers.length).fill("");
+
+      for (const [k, v] of Object.entries(rowData)) {
+        const idx = headers.findIndex((h) => h === k);
+        if (idx >= 0) rowValues[idx] = v as any;
+      }
+
+      const endCol = colLetter(headers.length);
+      range = `${sheetName}!A${rowNumber}:${endCol}${rowNumber}`;
+      values = [rowValues];
+    } else {
+      throw new Error("updateSheetRow: rowData must be array or object");
+    }
   }
-  return s;
-}
 
-/**
- * Actualiza una fila específica (rowNumber es 1-based, ej: fila 2).
- * Por defecto actualiza desde columna A hasta el largo de values.
- */
-export async function updateSheetRow(
-  sheetName: string,
-  rowNumber: number,
-  values: any[],
-  startColumn: string = "A",
-  valueInputOption: "RAW" | "USER_ENTERED" = "USER_ENTERED"
-) {
-  if (!Number.isFinite(rowNumber) || rowNumber < 1) {
-    throw new Error(`updateSheetRow: invalid rowNumber: ${rowNumber}`);
-  }
-
-  const sheets = getSheets();
-  const spreadsheetId = requireSheetId();
-
-  // Si empiezas en A, el final es length. Si cambias startColumn, mantenemos simple.
-  // (Lo normal en este proyecto es A)
-  const endColumn = colToA1(values.length || 1);
-
-  const range = `${sheetName}!${startColumn}${rowNumber}:${endColumn}${rowNumber}`;
-
-  const res = await sheets.spreadsheets.values.update({
+  await sheets.spreadsheets.values.update({
     spreadsheetId,
     range,
-    valueInputOption,
-    requestBody: { values: [values] },
+    valueInputOption: "RAW",
+    requestBody: { values },
   });
-
-  return res?.data;
 }
