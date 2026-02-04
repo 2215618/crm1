@@ -1,15 +1,18 @@
-import { NextResponse } from 'next/server';
-import { getSheetData } from '@/lib/sheets/client';
-import { mapRowsToLeads } from '@/lib/sheets/map';
+import { getSheetData } from "@/lib/sheets/client";
+import { mapRowsToGoldLeads } from "@/lib/sheets/map";
 
-export const dynamic = 'force-dynamic';
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const SHEET_NAME = "GoldLeads";
 
 export async function GET() {
   try {
-    const rows = await getSheetData('GoldLeads!A2:H');
-    const leads = mapRowsToLeads(rows);
-    return NextResponse.json(leads);
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch leads' }, { status: 500 });
+    const rows = await getSheetData(SHEET_NAME, "A:Z");
+    const data = mapRowsToGoldLeads(rows.slice(1));
+    return Response.json(data, { status: 200 });
+  } catch (err: any) {
+    console.error("GET /api/leads failed:", err?.message || err);
+    return Response.json([], { status: 200 });
   }
 }

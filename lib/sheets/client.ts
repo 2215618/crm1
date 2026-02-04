@@ -1,142 +1,143 @@
-import "server-only";
 import { google } from "googleapis";
-import type { sheets_v4 } from "googleapis";
 
-let cachedClient: sheets_v4.Sheets | null = null;
+/**
+ * Env vars soportadas:
+ * - Spreadsheet ID:
+ *   - GOOGLE_SHEETS_SPREADSHEET_ID (recomendado)
+ *   - SHEET_ID (legacy)
+ *   - SPREADSHEET_ID (legacy)
+ *
+ * - Service Account:
+ *   - GOOGLE_SERVICE_ACCOUNT_JSON (recomendado; JSON completo)
+ *   - GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY (legacy)
+ */
 
-function normalizePrivateKey(key?: string) {
-  if (!key) return "";
-  // Vercel a veces guarda saltos como \n literales
-  return key.includes("\\n") ? key.replace(/\\n/g, "\n") : key;
+let cachedSheets: ReturnType<typeof google.sheets> | null = null;
+
+function getSpreadsheetId(): string {
+  const id =
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
+    process.env.SHEET_ID ||
+    process.env.SPREADSHEET_ID;
+
+  if (!id) {
+    throw new Error(
+      "Missing spreadsheet id env. Set GOOGLE_SHEETS_SPREADSHEET_ID (or SHEET_ID)."
+    );
+  }
+  return id;
 }
 
-export function getSheetId(): string {
-  return process.env.SHEET_ID ?? "";
-}
+function getServiceAccount(): { clientEmail: string; privateKey: string } {
+  const rawJson =
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
+    process.env.GOOGLE_SERVICE_ACCOUNT;
 
-export async function getSheetsClient(): Promise<sheets_v4.Sheets> {
-  if (cachedClient) return cachedClient;
+  if (rawJson) {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(rawJson);
+    } catch {
+      throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.");
+    }
+
+    const clientEmail = parsed?.client_email;
+    const privateKey = parsed?.private_key;
+
+    if (!clientEmail || !privateKey) {
+      throw new Error(
+        "Invalid service account JSON. Missing client_email and/or private_key."
+      );
+    }
+
+    return { clientEmail, privateKey };
+  }
 
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const privateKeyRaw = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
 
-  if (!clientEmail) throw new Error("Missing env: GOOGLE_SERVICE_ACCOUNT_EMAIL");
-  if (!privateKeyRaw) throw new Error("Missing env: GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY");
+  if (!clientEmail || !privateKey) {
+    throw new Error(
+      "Missing service account env. Set GOOGLE_SERVICE_ACCOUNT_JSON (recommended) or GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY."
+    );
+  }
+
+  return { clientEmail, privateKey };
+}
+
+export function getSheetsClient() {
+  if (cachedSheets) return cachedSheets;
+
+  const { clientEmail, privateKey } = getServiceAccount();
 
   const auth = new google.auth.JWT({
     email: clientEmail,
-    key: normalizePrivateKey(privateKeyRaw),
+    key: privateKey.replace(/\\n/g, "\n"),
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 
-  cachedClient = google.sheets({ version: "v4", auth });
-  return cachedClient;
+  cachedSheets = google.sheets({ version: "v4", auth });
+  return cachedSheets;
 }
 
-function colLetter(n: number) {
-  // 1 -> A, 26 -> Z, 27 -> AA ...
-  let s = "";
-  while (n > 0) {
-    const m = (n - 1) % 26;
-    s = String.fromCharCode(65 + m) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s || "A";
+export function getSheetId() {
+  return getSpreadsheetId();
 }
 
-/**
- * Export compatible con lo que tus rutas y meta.ts están importando.
- * Uso típico:
- *   const values = await getSheetData("Properties");
- *   const values = await getSheetData("Properties", "A:ZZ");
- *   const values = await getSheetData("Properties", "Properties!A:ZZ");
- */
-export async function getSheetData(...args: any[]): Promise<any[][]> {
-  const sheetName = String(args?.[0] ?? "");
-  if (!sheetName) throw new Error("getSheetData: missing sheetName");
-
-  const spreadsheetId = getSheetId();
-  if (!spreadsheetId) throw new Error("Missing env: SHEET_ID");
-
-  const sheets = await getSheetsClient();
-
-  let range = args?.[1] ? String(args[1]) : `${sheetName}!A:ZZ`;
-  // Si te pasan "A:ZZ" lo convertimos a "Sheet!A:ZZ"
-  if (!range.includes("!")) range = `${sheetName}!${range}`;
+/** Lee valores crudos 2D desde una pestaña */
+export async function getSheetData(
+  sheetName: string,
+  range: string = "A:Z"
+): Promise<any[][]> {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range,
-    valueRenderOption: "UNFORMATTED_VALUE",
-    dateTimeRenderOption: "FORMATTED_STRING",
+    range: `${sheetName}!${range}`,
   });
 
-  return (res.data.values as any[][]) ?? [];
+  return (res.data.values ?? []) as any[][];
 }
 
-/**
- * Export compatible con lo que meta.ts está importando.
- *
- * Soporta 3 modos comunes:
- * 1) updateSheetRow("META", 2, ["a","b","c"])
- * 2) updateSheetRow("META", 2, { col1:"x", col2:"y" })   // mapea por headers (fila 1)
- * 3) updateSheetRow("META!A2:Z2", [["a","b"]])
- */
-export async function updateSheetRow(...args: any[]): Promise<void> {
-  const spreadsheetId = getSheetId();
-  if (!spreadsheetId) throw new Error("Missing env: SHEET_ID");
+/** Agrega una fila al final */
+export async function appendSheetRow(
+  sheetName: string,
+  row: any[],
+  range: string = "A:Z"
+) {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
 
-  const sheets = await getSheetsClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${sheetName}!${range}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [row] },
+  });
+}
 
-  let range = "";
-  let values: any[][] = [];
+/** Actualiza una fila por número (1-based). Escribe desde A hasta la longitud del array */
+export async function updateSheetRow(
+  sheetName: string,
+  rowNumber: number,
+  values: any[]
+) {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId();
 
-  // Modo 3: (rangeA1, values)
-  if (typeof args?.[0] === "string" && args[0].includes("!") && args.length >= 2) {
-    range = String(args[0]);
-    const v = args[1];
-    values = Array.isArray(v?.[0]) ? v : [v];
-  } else {
-    // Modo 1/2: (sheetName, rowNumber, rowValues|object)
-    const sheetName = String(args?.[0] ?? "");
-    const rowNumber = Number(args?.[1]);
-    const rowData = args?.[2];
+  const colStart = "A";
+  const colEnd =
+    values.length <= 26
+      ? String.fromCharCode("A".charCodeAt(0) + values.length - 1)
+      : "Z";
 
-    if (!sheetName) throw new Error("updateSheetRow: missing sheetName");
-    if (!Number.isFinite(rowNumber) || rowNumber <= 0) {
-      throw new Error("updateSheetRow: invalid rowNumber");
-    }
-
-    // Si es array: update directo desde A{row}
-    if (Array.isArray(rowData)) {
-      values = [rowData];
-      range = `${sheetName}!A${rowNumber}`;
-    } else if (rowData && typeof rowData === "object") {
-      // Si es objeto: mapeo por headers en la fila 1
-      const headerRows = await getSheetData(sheetName, `${sheetName}!1:1`);
-      const headers = (headerRows?.[0] ?? []).map((h: any) => String(h).trim());
-
-      if (!headers.length) throw new Error(`updateSheetRow: no headers found in ${sheetName} row 1`);
-
-      const rowValues = new Array(headers.length).fill("");
-
-      for (const [k, v] of Object.entries(rowData)) {
-        const idx = headers.findIndex((h) => h === k);
-        if (idx >= 0) rowValues[idx] = v as any;
-      }
-
-      const endCol = colLetter(headers.length);
-      range = `${sheetName}!A${rowNumber}:${endCol}${rowNumber}`;
-      values = [rowValues];
-    } else {
-      throw new Error("updateSheetRow: rowData must be array or object");
-    }
-  }
+  const range = `${sheetName}!${colStart}${rowNumber}:${colEnd}${rowNumber}`;
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range,
-    valueInputOption: "RAW",
-    requestBody: { values },
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [values] },
   });
 }
