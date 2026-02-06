@@ -1,24 +1,56 @@
-import type { SheetSpec } from "./client";
+export type SheetSpec = {
+  /** Internal key */
+  key: string;
+  /** Candidate tab names in Google Sheets (case-sensitive) */
+  tabCandidates: string[];
+  /** Header row index (1-based). Typically 1. */
+  headerRow: number;
+};
 
-const env = (k: string) => process.env[k]?.trim();
-const DEFAULT_RANGE = "A1:ZZ";
-
-export const SHEETS = {
+/**
+ * IMPORTANT:
+ * These candidates MUST match your Google Sheets tab names.
+ * User confirmed tabs: Properties, Appointment, GoldLeads, META
+ */
+export const SHEETS: Record<"properties"|"appointments"|"leads"|"meta", SheetSpec> = {
   properties: {
-    tab: env("SHEET_TAB_PROPERTIES"),
-    tabCandidates: ["Propiedades", "properties", "Inventario", "Inventory", "Hoja1", "Sheet1"],
-    range: env("SHEET_RANGE_PROPERTIES") || DEFAULT_RANGE,
-  } satisfies SheetSpec,
-
-  leads: {
-    tab: env("SHEET_TAB_LEADS"),
-    tabCandidates: ["Leads", "Clientes", "Prospectos", "Hoja2", "Sheet2"],
-    range: env("SHEET_RANGE_LEADS") || DEFAULT_RANGE,
-  } satisfies SheetSpec,
-
+    key: "properties",
+    tabCandidates: [
+      "Properties",
+      "Propiedades",
+      "PROPERTIES",
+      "properties",
+      "Inventory",
+      "Inventario",
+    ],
+    headerRow: 1,
+  },
   appointments: {
-    tab: env("SHEET_TAB_APPOINTMENTS"),
-    tabCandidates: ["Citas", "Agenda", "Appointments", "Hoja3", "Sheet3"],
-    range: env("SHEET_RANGE_APPOINTMENTS") || DEFAULT_RANGE,
-  } satisfies SheetSpec,
-} as const;
+    key: "appointments",
+    tabCandidates: [
+      "Appointment",
+      "Appointments",
+      "Citas",
+      "appointments",
+      "appointment",
+    ],
+    headerRow: 1,
+  },
+  leads: {
+    key: "leads",
+    tabCandidates: [
+      "GoldLeads",
+      "Gold Leads",
+      "Lista Dorada",
+      "Leads",
+      "leads",
+      "goldleads",
+    ],
+    headerRow: 1,
+  },
+  meta: {
+    key: "meta",
+    tabCandidates: ["META", "Meta", "meta"],
+    headerRow: 1,
+  },
+};

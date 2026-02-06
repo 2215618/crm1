@@ -195,3 +195,101 @@ export async function getSpreadsheetMeta() {
   });
   return res.data;
 }
+
+
+// -----------------------------
+// META helpers (for cloud refresh)
+// -----------------------------
+
+function isIsoDate(s: string) {
+  return typeof s === "string" && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s);
+}
+
+async function resolveMetaTitle() {
+  // Local import to avoid circular deps
+  const { SHEETS } = await import("./meta");
+  return resolveSheetTitle(SHEETS.meta.tabCandidates);
+}
+
+/**
+ * Reads the META tab and returns a last_change_ts value if present.
+ * Supports either:
+ * - A1 = ISO timestamp
+ * - A1 = "last_change_ts" and B1 = ISO timestamp
+ * - A column with "last_change_ts" in col A and value in col B
+ */
+export async function getMeta(): Promise<{ last_change_ts: string }> {
+  try {
+    const sheets = await getSheetsClient();
+    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+    if (!spreadsheetId) return { last_change_ts: "" };
+
+    const title = await resolveMetaTitle();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${title}!A1:B20`,
+    });
+
+    const values = (res.data.values || []) as string[][];
+
+    if (values.length === 0) return { last_change_ts: "" };
+
+    const a1 = (values[0]?.[0] || "").trim();
+    const b1 = (values[0]?.[1] || "").trim();
+
+    if (isIsoDate(a1)) return { last_change_ts: a1 };
+    if (a1.toLowerCase() === "last_change_ts" && isIsoDate(b1)) return { last_change_ts: b1 };
+
+    // search down column A
+    for (const row of values) {
+      const k = (row?.[0] || "").toLowerCase().trim();
+      const v = (row?.[1] || "").trim();
+      if (k === "last_change_ts" && isIsoDate(v)) return { last_change_ts: v };
+    }
+
+    return { last_change_ts: "" };
+  } catch (e) {
+    console.error("getMeta error:", e);
+    return { last_change_ts: "" };
+  }
+}
+
+/**
+ * Updates META with a new timestamp and returns it.
+ * Prefers writing:
+ * - If A1 == "last_change_ts" => set B1
+ * - Else set A1 to timestamp
+ */
+export async function touchMeta(): Promise<{ last_change_ts: string }> {
+  const ts = new Date().toISOString();
+
+  try {
+    const sheets = await getSheetsClient();
+    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+    if (!spreadsheetId) return { last_change_ts: ts };
+
+    const title = await resolveMetaTitle();
+
+    // read first cell(s) to decide layout
+    const head = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${title}!A1:B1`,
+    });
+    const row = (head.data.values?.[0] || []) as string[];
+    const a1 = (row?.[0] || "").toLowerCase().trim();
+
+    const targetRange = a1 === "last_change_ts" ? `${title}!B1` : `${title}!A1`;
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: targetRange,
+      valueInputOption: "RAW",
+      requestBody: { values: [[ts]] },
+    });
+
+    return { last_change_ts: ts };
+  } catch (e) {
+    console.error("touchMeta error:", e);
+    return { last_change_ts: ts };
+  }
+}

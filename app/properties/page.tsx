@@ -14,10 +14,16 @@ export default function PropertiesPage() {
   const { data: properties, isLoading } = useQuery<Property[]>({
     queryKey: ["properties"],
     queryFn: async () => {
-      const res = await fetch("/api/properties");
-      if (!res.ok) throw new Error("Network error");
-      return res.json();
-    }
+      try {
+        const res = await fetch("/api/properties", { cache: "no-store" });
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+      } catch {
+        return [];
+      }
+    },
+    retry: 0
   });
 
   const handleCreate = () => {
