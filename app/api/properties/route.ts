@@ -20,25 +20,51 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
+    // Build a payload that can be appended whether your sheet headers are:
+    // - Internal keys (id, tipo, direccion, distrito, precio_soles, ...)
+    // - Human/Spanish headers ("Tipo de inmueble", "Dirección del inmueble", "Zona / Distrito", ...)
+    // The sheets client normalizes headers, so we provide both sets of keys.
+    const nowIso = new Date().toISOString();
+    const id = body.id || `PROP-${Date.now()}`;
+    const operacion = body.operacion || 'Alquiler';
+    const tipo = body.tipo || '';
+    const direccion = body.direccion || '';
+    const distrito = body.distrito || '';
+    const area_m2 = Number(body.area_m2) || 0;
+    const precio_soles = Number(body.precio_soles) || 0;
+    const descripcion = body.descripcion || '';
+    const propietario_nombre = body.propietario_nombre || '';
+    const propietario_celular = body.propietario_celular || '';
     
     const newProperty = {
-      id: `PROP-${Date.now()}`,
-      operacion: body.operacion,
-      tipo: body.tipo,
-      propietario_nombre: body.propietario_nombre,
-      propietario_celular: body.propietario_celular,
-      distrito: body.distrito,
-      direccion: body.direccion,
-      area_m2: body.area_m2,
-      precio_soles: body.precio_soles,
-      precio_usd_ref: body.precio_usd_ref,
-      disponibilidad: 'Disponible',
+      // Internal keys
+      id,
+      operacion,
+      tipo,
+      propietario_nombre,
+      propietario_celular,
+      distrito,
+      direccion,
+      area_m2,
+      precio_soles,
+      precio_usd_ref: Number(body.precio_usd_ref) || 0,
+      disponibilidad: body.disponibilidad || 'Disponible',
       amoblado: body.amoblado ? 'TRUE' : 'FALSE',
-      tags: body.tags, 
-      descripcion: body.descripcion,
+      tags: body.tags,
+      descripcion,
       image_url: body.image_url || 'https://picsum.photos/400/300',
       version: 1,
-      updated_at: new Date().toISOString()
+      updated_at: nowIso,
+
+      // Spanish / human headers (normalized by the sheets client)
+      nombre_del_propietario: propietario_nombre,
+      tipo_de_inmueble: tipo,
+      direccion_del_inmueble: direccion,
+      zona_distrito: distrito,
+      area_m2: area_m2,
+      caracteristicas_descr: descripcion,
+      precio_alquiler_s: precio_soles,
     };
 
     // Tab Name: 'Properties'
