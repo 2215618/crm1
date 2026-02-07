@@ -1,5 +1,23 @@
 import { google } from 'googleapis';
 
+function normalizeHeader(input: string): string {
+  // Turn any human header into a stable, JS-friendly key.
+  // Examples:
+  //  - "Área (m²)" -> "area_m2"
+  //  - "Zona / Distrito" -> "zona_distrito"
+  //  - "Precio alquiler (S/)" -> "precio_alquiler_s"
+  const s = (input ?? '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return s
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
 // --- ENV VAR NORMALIZATION ---
@@ -67,14 +85,15 @@ export async function getSheetData(sheetName: string): Promise<Record<string, st
     const rows = response.data.values;
     if (!rows || rows.length === 0) return [];
 
-    // Headers: lowercase, trimmed, underscores
-    const headers = rows[0].map(h => h.toLowerCase().trim().replace(/\s+/g, '_'));
+    // Normalize headers to stable keys (no accents, no symbols)
+    const headerOriginal = rows[0];
+    const headers = headerOriginal.map(normalizeHeader);
     const dataRows = rows.slice(1);
 
     return dataRows.map(row => {
       const obj: Record<string, string> = {};
       headers.forEach((header, index) => {
-        obj[header] = row[index] || '';
+        obj[header] = row[index] ?? '';
       });
       return obj;
     });
@@ -106,11 +125,16 @@ export async function appendSheetRow(sheetName: string, data: Record<string, any
       throw new Error(`Sheet "${sheetName}" has no headers.`);
     }
 
-    const headers = headerResponse.data.values[0].map((h: string) => h.toLowerCase().trim().replace(/\s+/g, '_'));
+    const headerOriginal = headerResponse.data.values[0] as string[];
+    const headers = headerOriginal.map(normalizeHeader);
 
     // 2. Map data
-    const rowValues = headers.map(header => {
-      const val = data[header];
+    const rowValues = headers.map((headerKey, idx) => {
+      const rawHeader = headerOriginal[idx];
+      const val =
+        data[headerKey] ??
+        data[rawHeader] ??
+        data[rawHeader?.trim?.() ?? ''];
       if (val === true) return "TRUE";
       if (val === false) return "FALSE";
       if (Array.isArray(val)) return val.join(',');
