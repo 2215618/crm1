@@ -1,10 +1,10 @@
 "use client";
 
-import React from 'react';
+import React, { PropsWithChildren } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({ children }: PropsWithChildren) {
   const pathname = usePathname();
   const isActive = (path: string) => pathname === path || (path !== '/' && pathname.startsWith(path));
 

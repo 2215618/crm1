@@ -1,56 +1,35 @@
-export type SheetSpec = {
-  /** Internal key */
-  key: string;
-  /** Candidate tab names in Google Sheets (case-sensitive) */
-  tabCandidates: string[];
-  /** Header row index (1-based). Typically 1. */
-  headerRow: number;
-};
+import { getRangeValues, updateSheetRow } from './client';
 
 /**
- * IMPORTANT:
- * These candidates MUST match your Google Sheets tab names.
- * User confirmed tabs: Properties, Appointment, GoldLeads, META
+ * Reads the last_change_ts from META!A2.
+ * Returns null if empty or error.
  */
-export const SHEETS: Record<"properties"|"appointments"|"leads"|"meta", SheetSpec> = {
-  properties: {
-    key: "properties",
-    tabCandidates: [
-      "Properties",
-      "Propiedades",
-      "PROPERTIES",
-      "properties",
-      "Inventory",
-      "Inventario",
-    ],
-    headerRow: 1,
-  },
-  appointments: {
-    key: "appointments",
-    tabCandidates: [
-      "Appointment",
-      "Appointments",
-      "Citas",
-      "appointments",
-      "appointment",
-    ],
-    headerRow: 1,
-  },
-  leads: {
-    key: "leads",
-    tabCandidates: [
-      "GoldLeads",
-      "Gold Leads",
-      "Lista Dorada",
-      "Leads",
-      "leads",
-      "goldleads",
-    ],
-    headerRow: 1,
-  },
-  meta: {
-    key: "meta",
-    tabCandidates: ["META", "Meta", "meta"],
-    headerRow: 1,
-  },
-};
+export async function getMeta(): Promise<string | null> {
+  try {
+    const rows = await getRangeValues('META', 'A2');
+    if (rows && rows.length > 0 && rows[0].length > 0) {
+      return rows[0][0];
+    }
+    return null;
+  } catch (error) {
+    console.error("Error reading META:", error);
+    return null;
+  }
+}
+
+/**
+ * Writes the current ISO timestamp to META!A2.
+ * Returns the new timestamp.
+ */
+export async function touchMeta(): Promise<string> {
+  const now = new Date().toISOString();
+  try {
+    await updateSheetRow('META', 'A2', [now]);
+    return now;
+  } catch (error) {
+    console.error("Error touching META:", error);
+    // Return the generated timestamp even if write failed 
+    // so the UI can proceed optimistically
+    return now;
+  }
+}

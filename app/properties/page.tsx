@@ -1,38 +1,79 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import AppShell from "@/components/AppShell";
 import TopHeader from "@/components/TopHeader";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Property } from "@/types";
 import { toast } from "sonner";
+import { Dialog } from '@headlessui/react';
+import { safeFetchArray } from "@/lib/api/safeFetch";
 
 export default function PropertiesPage() {
   const [view, setView] = useState<'Cards' | 'Table'>('Cards');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const queryClient = useQueryClient();
+
+  // --- FORM STATE ---
+  const [formData, setFormData] = useState({
+    operacion: 'Venta',
+    tipo: 'Departamento',
+    distrito: '',
+    direccion: '',
+    precio_soles: '',
+    precio_usd_ref: '',
+    area_m2: '',
+    propietario_nombre: '',
+    propietario_celular: ''
+  });
 
   const { data: properties, isLoading } = useQuery<Property[]>({
     queryKey: ["properties"],
-    queryFn: async () => {
-      try {
-        const res = await fetch("/api/properties", { cache: "no-store" });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return Array.isArray(data) ? data : [];
-      } catch {
-        return [];
-      }
-    },
-    retry: 0
+    queryFn: () => safeFetchArray<Property>("/api/properties"),
+    initialData: []
   });
 
-  const handleCreate = () => {
-    toast.info("Funcionalidad de Crear Propiedad próximamente (Requiere Modal Completo)");
+  const createMutation = useMutation({
+    mutationFn: async (newProp: any) => {
+      const res = await fetch('/api/properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProp)
+      });
+      if (!res.ok) throw new Error('Failed to create');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["properties"] });
+      toast.success("Propiedad creada exitosamente");
+      setIsModalOpen(false);
+      setFormData({
+        operacion: 'Venta',
+        tipo: 'Departamento',
+        distrito: '',
+        direccion: '',
+        precio_soles: '',
+        precio_usd_ref: '',
+        area_m2: '',
+        propietario_nombre: '',
+        propietario_celular: ''
+      });
+    },
+    onError: () => {
+      toast.error("Error al crear propiedad. Verifique configuración de Sheets.");
+    }
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate(formData);
   };
+
+  const safeProperties = Array.isArray(properties) ? properties : [];
 
   return (
     <AppShell>
-      <TopHeader title="Inventario de Propiedades" onNewClick={handleCreate} />
+      <TopHeader title="Inventario de Propiedades" onNewClick={() => setIsModalOpen(true)} />
       <main className="flex-1 overflow-y-auto p-6 bg-background-light dark:bg-background-dark">
         <div className="max-w-[1440px] mx-auto">
           {/* Controls */}
@@ -68,7 +109,7 @@ export default function PropertiesPage() {
              </div>
           ) : view === 'Cards' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {properties?.map((prop) => (
+              {safeProperties.map((prop) => (
                 <div key={prop.id} className="group flex flex-col bg-white dark:bg-[#1a202c] rounded-xl shadow-soft hover:shadow-lg overflow-hidden border border-transparent dark:border-gray-800 transition-all">
                   <div className="relative h-48 bg-cover bg-center transition-transform" style={{backgroundImage: `url('${prop.image_url || 'https://picsum.photos/400/300'}')`}}>
                     <span className={`absolute top-3 left-3 px-2 py-1 rounded-md text-xs font-bold text-white ${prop.operacion === 'Venta' ? 'bg-blue-600' : 'bg-green-500'}`}>{prop.operacion}</span>
@@ -77,7 +118,7 @@ export default function PropertiesPage() {
                     <h3 className="text-lg font-bold leading-tight truncate mb-2">{prop.distrito}, {prop.direccion}</h3>
                     <div className="flex justify-between items-end mb-4">
                       <span className="text-primary text-lg font-bold">
-                        {prop.operacion === 'Venta' ? `USD ${prop.precio_usd_ref.toLocaleString()}` : `S/ ${prop.precio_soles.toLocaleString()}`}
+                        {prop.operacion === 'Venta' ? `USD ${prop.precio_usd_ref?.toLocaleString()}` : `S/ ${prop.precio_soles?.toLocaleString()}`}
                       </span>
                       <span className="text-xs text-gray-400">{prop.area_m2} m²</span>
                     </div>
@@ -99,12 +140,12 @@ export default function PropertiesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                    {properties?.map(prop => (
+                    {safeProperties.map(prop => (
                       <tr key={prop.id} className="hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
                         <td className="p-3 pl-6 text-sm font-medium">{prop.tipo}</td>
                         <td className="p-3"><span className={`px-2 py-0.5 rounded text-[10px] font-bold ${prop.operacion === 'Venta' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{prop.operacion}</span></td>
                         <td className="p-3 text-sm">{prop.distrito}, {prop.direccion}</td>
-                        <td className="p-3 text-sm font-bold">{prop.operacion === 'Venta' ? `$ ${prop.precio_usd_ref.toLocaleString()}` : `S/ ${prop.precio_soles.toLocaleString()}`}</td>
+                        <td className="p-3 text-sm font-bold">{prop.operacion === 'Venta' ? `$ ${prop.precio_usd_ref?.toLocaleString()}` : `S/ ${prop.precio_soles?.toLocaleString()}`}</td>
                         <td className="p-3 text-sm">{prop.area_m2} m²</td>
                       </tr>
                     ))}
@@ -113,6 +154,78 @@ export default function PropertiesPage() {
             </div>
           )}
         </div>
+
+        {/* --- CREATE MODAL --- */}
+        <Dialog open={isModalOpen} onClose={() => setIsModalOpen(false)} className="relative z-50">
+          <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
+          <div className="fixed inset-0 flex items-center justify-center p-4">
+            <Dialog.Panel className="w-full max-w-lg rounded-2xl bg-white dark:bg-surface-dark p-6 shadow-xl border border-gray-200 dark:border-gray-700">
+              <Dialog.Title className="text-lg font-bold mb-4">Nueva Propiedad</Dialog.Title>
+              <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Operación</label>
+                        <select className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.operacion} onChange={e => setFormData({...formData, operacion: e.target.value})}>
+                            <option>Venta</option>
+                            <option>Alquiler</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Tipo</label>
+                        <select className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.tipo} onChange={e => setFormData({...formData, tipo: e.target.value})}>
+                            <option>Departamento</option>
+                            <option>Casa</option>
+                            <option>Terreno</option>
+                            <option>Local</option>
+                            <option>Oficina</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                     <div>
+                        <label className="text-xs font-bold text-gray-500">Distrito</label>
+                        <input required className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.distrito} onChange={e => setFormData({...formData, distrito: e.target.value})} />
+                     </div>
+                     <div>
+                        <label className="text-xs font-bold text-gray-500">Dirección</label>
+                        <input required className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.direccion} onChange={e => setFormData({...formData, direccion: e.target.value})} />
+                     </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Precio S/</label>
+                        <input type="number" className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.precio_soles} onChange={e => setFormData({...formData, precio_soles: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Precio USD</label>
+                        <input type="number" className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.precio_usd_ref} onChange={e => setFormData({...formData, precio_usd_ref: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-gray-500">Area m2</label>
+                        <input type="number" className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.area_m2} onChange={e => setFormData({...formData, area_m2: e.target.value})} />
+                    </div>
+                </div>
+                 <div className="grid grid-cols-2 gap-4">
+                     <div>
+                        <label className="text-xs font-bold text-gray-500">Propietario</label>
+                        <input required className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.propietario_nombre} onChange={e => setFormData({...formData, propietario_nombre: e.target.value})} />
+                     </div>
+                     <div>
+                        <label className="text-xs font-bold text-gray-500">Celular Prop.</label>
+                        <input required className="w-full p-2 rounded border dark:bg-gray-800 dark:border-gray-600 text-sm" value={formData.propietario_celular} onChange={e => setFormData({...formData, propietario_celular: e.target.value})} />
+                     </div>
+                </div>
+
+                <div className="flex gap-3 justify-end mt-4">
+                    <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg">Cancelar</button>
+                    <button type="submit" disabled={createMutation.isPending} className="px-4 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary-dark disabled:opacity-50">
+                        {createMutation.isPending ? 'Guardando...' : 'Guardar Propiedad'}
+                    </button>
+                </div>
+              </form>
+            </Dialog.Panel>
+          </div>
+        </Dialog>
       </main>
     </AppShell>
   );

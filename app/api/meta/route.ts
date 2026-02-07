@@ -1,36 +1,25 @@
-import { NextResponse } from "next/server";
-import { getMeta, touchMeta } from "@/lib/sheets/client";
+import { NextResponse } from 'next/server';
+import { getMeta, touchMeta } from '@/lib/sheets/meta';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
-/**
- * Used by the client hook `useCloudRefresh` to detect changes.
- * Always returns 200 to avoid crashing the UI.
- */
 export async function GET() {
   try {
-    const meta = await getMeta();
-    return NextResponse.json(
-      {
-        last_change_ts: meta.last_change_ts || "",
-      },
-      { status: 200 }
-    );
+    const ts = await getMeta();
+    const last_change_ts = ts || new Date().toISOString();
+    return NextResponse.json({ last_change_ts });
   } catch (error) {
-    console.error("GET /api/meta error:", error);
-    return NextResponse.json({ last_change_ts: "" }, { status: 200 });
+    console.error("Meta GET Error:", error);
+    // Fallback to current time, prevent crash
+    return NextResponse.json({ last_change_ts: new Date().toISOString() }, { status: 200 });
   }
 }
 
-/**
- * Optional: allows the app to "touch" the META tab to notify clients to refresh.
- */
 export async function POST() {
   try {
-    const meta = await touchMeta();
-    return NextResponse.json(meta, { status: 200 });
+    const newTs = await touchMeta();
+    return NextResponse.json({ ok: true, last_change_ts: newTs });
   } catch (error) {
-    console.error("POST /api/meta error:", error);
-    return NextResponse.json({ last_change_ts: new Date().toISOString() }, { status: 200 });
+    return NextResponse.json({ ok: false }, { status: 200 });
   }
 }

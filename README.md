@@ -1,60 +1,53 @@
-# LG Inmobiliaria CRM (STITCH Clone)
+# LG Inmobiliaria CRM
 
-A high-fidelity Real Estate CRM built with Next.js 14, Tailwind CSS, and Google Sheets as a backend.
+A real-time Real Estate CRM built with Next.js 14 and Google Sheets.
 
-## 🚀 Quick Start (Mock Mode)
+## 🔐 Setup Credentials (Required for Production)
 
-You can run the application immediately without Google API keys. It will detect missing credentials and serve data from `data/seed.json`.
+For the application to connect to Google Sheets securely (Server-Side only), you must configure the following environment variables.
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+### 1. Google Cloud Service Account
+1. Go to [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a project.
+3. Enable the **Google Sheets API**.
+4. Go to **IAM & Admin > Service Accounts**.
+5. Create a Service Account and generate a **JSON Key**.
+6. Download the JSON file.
 
-2. Run the development server:
-   ```bash
-   npm run dev
-   ```
+### 2. Google Sheet Setup
+1. Create a new Google Sheet.
+2. Rename tabs to exactly: `Properties`, `Appointments`, `GoldLeads`, `META`.
+3. In `META!A1` write `last_change_ts`.
+4. In `META!A2` write an initial date (e.g., `2023-01-01T00:00:00.000Z`).
+5. **Share** the spreadsheet with the `client_email` found in your JSON key (Give it **Editor** access).
+6. Copy the Spreadsheet ID from the URL: `docs.google.com/spreadsheets/d/[THIS_IS_THE_ID]/edit`.
 
-3. Open [http://localhost:3000](http://localhost:3000).
-
-## 🔌 Connecting to Google Sheets
-
-To enable real persistence and multi-user sync:
-
-1. Create a Google Cloud Project and enable **Google Sheets API**.
-2. Create a **Service Account** and download the JSON key.
-3. Create a Google Sheet with 4 tabs: `Properties`, `Appointments`, `GoldLeads`, `META`.
-4. **Share** the Sheet with the Service Account email (Editor access).
-5. In `META!A2`, type an initial date (e.g., `2023-01-01`).
-6. Create a `.env.local` file:
+### 3. Environment Variables (.env.local)
+Create a `.env.local` file in the root directory:
 
 ```env
 SHEET_ID=your_spreadsheet_id_here
-GOOGLE_SERVICE_ACCOUNT_EMAIL=your_service_account_email@...
-GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your_service_account_email@project.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"
+```
+*Note: Ensure the private key is enclosed in quotes and includes the `\n` characters exactly as shown in the JSON file.*
+
+## 🚀 Development
+
+### Run with Mock Data (No Keys)
+If no environment variables are present, the app falls back to `data/seed.json` automatically.
+
+```bash
+npm run dev
 ```
 
-## 🏗 Architecture
+### Run with Real Data
+1. Configure `.env.local`
+2. Run `npm run dev`
+3. Visit `/api/health` to verify connection.
 
-- **Frontend**: Next.js App Router, Tailwind CSS.
-- **State**: React Query (TanStack Query) handles caching and background polling.
-- **Backend**: Next.js API Routes act as a proxy to Google Sheets.
-- **Sync**: The `useMetaPolling` hook checks `META!A2` every 4 seconds. If the timestamp changes, it invalidates queries to refresh UI.
-- **Concurrency**: Writes require sending the current `version`. The server checks the Sheet's version column before writing.
+## 📦 Deployment on Vercel
 
-## 📱 Features
-
-- **Properties**: Card and Table views.
-- **Appointments**: Daily agenda list.
-- **Gold List**: Kanban-style pipeline.
-- **WhatsApp**: Logic structure ready in `app/appointments/page.tsx` (button triggers).
-
-## 🛠 Deployment
-
-This project is optimized for Vercel.
-
-1. Push to GitHub.
-2. Import to Vercel.
-3. Add the Environment Variables in Vercel settings.
-4. Deploy.
+1. Import project to Vercel.
+2. Add the environment variables in the Project Settings.
+3. Deploy.

@@ -1,22 +1,28 @@
-import { NextResponse } from "next/server";
-import { getSpreadsheetMeta, listSheetTitles } from "@/lib/sheets/client";
+import { NextResponse } from 'next/server';
+import { getRangeValues, getSheetId } from '@/lib/sheets/client';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  try {
-    const titles = await listSheetTitles();
-    const meta = await getSpreadsheetMeta();
-    return NextResponse.json({
-      ok: true,
-      spreadsheetId: meta.spreadsheetId,
-      title: meta.properties?.title,
-      sheetTitles: titles,
-    });
-  } catch (err: any) {
-    return NextResponse.json({
-      ok: false,
-      error: err?.message || String(err),
-    });
+  const hasEnv = !!getSheetId() && !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  
+  let sheetConnection = false;
+  let errorDetail = '';
+
+  if (hasEnv) {
+    try {
+      // Try to read one cell from META to verify permission
+      await getRangeValues('META', 'A1');
+      sheetConnection = true;
+    } catch (e: any) {
+      errorDetail = e.message;
+    }
   }
+
+  return NextResponse.json({
+    status: sheetConnection ? 'healthy' : (hasEnv ? 'degraded' : 'mock-mode'),
+    env_configured: hasEnv,
+    sheet_connected: sheetConnection,
+    error: errorDetail
+  });
 }

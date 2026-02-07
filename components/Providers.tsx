@@ -1,11 +1,10 @@
 "use client";
 
-import React from 'react';
+import React, { useState, PropsWithChildren } from 'react';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
 import useMetaPolling from "../lib/hooks/useMetaPolling";
 
-export default function Providers({ children }: { children: React.ReactNode }) {
+export default function Providers({ children }: PropsWithChildren) {
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -24,7 +23,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   );
 }
 
-function PollingWrapper({ children }: { children: React.ReactNode }) {
+function PollingWrapper({ children }: PropsWithChildren) {
   // Initialize the global polling mechanism
   useMetaPolling();
   return <>{children}</>;

@@ -1,131 +1,110 @@
-// app/page.tsx
 "use client";
 
 import React from 'react';
 import AppShell from "@/components/AppShell";
+import TopHeader from "@/components/TopHeader";
 import { useQuery } from "@tanstack/react-query";
 import { Property, Appointment } from "@/types";
-import Link from "next/link";
-
-async function safeFetchArray<T>(url: string): Promise<T[]> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return Array.isArray(data) ? data : [];
-}
+import { useRouter } from "next/navigation";
 
 export default function DashboardPage() {
-  const { data: properties = [], isLoading: loadingProps } = useQuery<Property[]>({
+  const router = useRouter();
+
+  const { data: properties } = useQuery<Property[]>({
     queryKey: ["properties"],
-    queryFn: () => safeFetchArray<Property>("/api/properties"),
-    staleTime: 10_000,
+    queryFn: () => fetch("/api/properties").then(res => res.json())
   });
 
-  const { data: appointments = [], isLoading: loadingAppts } = useQuery<Appointment[]>({
+  const { data: appointments } = useQuery<Appointment[]>({
     queryKey: ["appointments"],
-    queryFn: () => safeFetchArray<Appointment>("/api/appointments"),
-    staleTime: 10_000,
+    queryFn: () => fetch("/api/appointments").then(res => res.json())
   });
 
-  const totalCount = properties.length;
-  const availableCount = properties.filter(p => (p as any).estado === "Disponible").length;
-  const reservedCount = properties.filter(p => (p as any).estado === "Reservada").length;
-
-  const todayCount = appointments.length;
-
-  // Si todavía está cargando, igual NO debe crashear
-  const loading = loadingProps || loadingAppts;
+  const available = properties?.filter(p => p.disponibilidad === 'Disponible').length || 0;
+  const reserved = properties?.filter(p => p.disponibilidad === 'Reservado').length || 0;
+  const total = properties?.length || 0;
+  const percentage = total > 0 ? Math.round((available / total) * 100) : 0;
+  
+  const todayAppointments = appointments?.filter(a => a.fecha === new Date().toISOString().split('T')[0]).length || 0;
 
   return (
     <AppShell>
-      <main className="flex-1 overflow-y-auto p-6 bg-background-light dark:bg-background-dark">
-        <div className="max-w-[1440px] mx-auto">
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 mb-6">
-            Dashboard Action Center
-          </h1>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Estado de Inventario */}
-            <div className="bg-white dark:bg-[#1a202c] rounded-2xl shadow-soft p-6 border border-slate-200 dark:border-slate-700">
-              <h2 className="text-sm font-bold text-slate-600 dark:text-slate-300 mb-1">Estado de Inventario</h2>
-              <p className="text-xs text-slate-400 mb-4">{totalCount} propiedades totales</p>
-
-              <div className="flex items-center gap-6">
-                <div className="h-16 w-16 rounded-full border-4 border-slate-100 dark:border-slate-700 flex items-center justify-center">
-                  <span className="text-xs font-bold text-slate-500">
-                    {totalCount === 0 ? "0%" : `${Math.round((availableCount / totalCount) * 100)}%`}
-                  </span>
-                </div>
-
-                <div className="flex-1 text-sm">
-                  <div className="flex justify-between py-1">
-                    <span className="text-slate-500">Disponibles</span>
-                    <span className="font-bold">{availableCount}</span>
-                  </div>
-                  <div className="flex justify-between py-1">
-                    <span className="text-slate-500">Reservadas</span>
-                    <span className="font-bold">{reservedCount}</span>
-                  </div>
-                </div>
-              </div>
-
-              {loading && (
-                <p className="mt-4 text-xs text-slate-400">Cargando datos…</p>
-              )}
-            </div>
-
-            {/* Agenda de Hoy */}
-            <div className="bg-white dark:bg-[#1a202c] rounded-2xl shadow-soft p-6 border border-slate-200 dark:border-slate-700 flex flex-col">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="material-symbols-outlined text-[18px] text-primary">calendar_month</span>
-                <h2 className="text-sm font-bold text-slate-600 dark:text-slate-300">Agenda de Hoy</h2>
-              </div>
-
-              <div className="flex items-end justify-between mt-auto">
-                <div>
-                  <div className="text-4xl font-extrabold">{todayCount}</div>
-                  <p className="text-xs text-slate-400">Citas programadas</p>
-                </div>
-                <Link
-                  href="/appointments"
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-bold"
-                >
-                  Ver Agenda <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                </Link>
+      <TopHeader title="Dashboard Action Center" showSearch={false} />
+      <div className="flex-1 overflow-y-auto p-6 lg:p-8">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 max-w-[1920px] mx-auto pb-8">
+          
+          {/* Inventory Stats */}
+          <div className="col-span-12 md:col-span-6 xl:col-span-4 bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-border-light dark:border-border-dark shadow-subtle flex flex-col justify-between h-48 relative overflow-hidden group">
+            <div className="flex justify-between items-start z-10">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Estado de Inventario</h3>
+                <p className="text-xs text-slate-500 mt-1">{total} propiedades totales</p>
               </div>
             </div>
-
-            {/* Leads Calientes (placeholder visual, sin crash) */}
-            <div className="bg-white dark:bg-[#1a202c] rounded-2xl shadow-soft p-6 border border-slate-200 dark:border-slate-700 flex flex-col">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="material-symbols-outlined text-[18px] text-red-500">local_fire_department</span>
-                <h2 className="text-sm font-bold text-slate-600 dark:text-slate-300">Leads Calientes</h2>
-              </div>
-
-              <div className="flex items-end justify-between mt-auto">
-                <div>
-                  <div className="text-4xl font-extrabold">3</div>
-                  <p className="text-xs text-green-600">+1 nuevo</p>
+            <div className="flex items-center gap-6 mt-2 z-10">
+              <div className="relative size-20 shrink-0">
+                <svg className="size-full -rotate-90 transform group-hover:scale-105 transition-transform duration-500" viewBox="0 0 36 36">
+                  <circle cx="18" cy="18" r="16" fill="none" className="text-gray-100 dark:text-gray-800" stroke="currentColor" strokeWidth="4" />
+                  <circle cx="18" cy="18" r="16" fill="none" className="text-primary" stroke="currentColor" strokeWidth="4" strokeDasharray={`${percentage}, 100`} strokeLinecap="round" />
+                </svg>
+                <div className="absolute inset-0 flex items-center justify-center flex-col">
+                  <span className="text-xs font-bold text-slate-400">{percentage}%</span>
                 </div>
-                <Link
-                  href="/gold-list"
-                  className="inline-flex items-center justify-center rounded-xl bg-primary text-white px-4 py-2 text-sm font-bold"
-                >
-                  Ver Leads
-                </Link>
+              </div>
+              <div className="flex flex-col gap-2 flex-1">
+                <div className="flex justify-between items-center text-sm border-b border-dashed border-gray-100 dark:border-gray-800 pb-1">
+                  <span className="text-slate-600 dark:text-slate-300 text-xs font-medium">Disponibles</span>
+                  <span className="font-bold text-slate-900 dark:text-white text-xs">{available}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm pb-1">
+                  <span className="text-slate-600 dark:text-slate-300 text-xs font-medium">Reservadas</span>
+                  <span className="font-bold text-slate-900 dark:text-white text-xs">{reserved}</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-8 text-xs text-slate-400">
-            {properties.length === 0 && (
-              <p>
-                Nota: si tu API falla o no devuelve un array, el Dashboard ya no se cae. (Se mostrará en 0 hasta que el API responda bien.)
-              </p>
-            )}
+          {/* Agenda Stats */}
+          <div className="col-span-12 md:col-span-6 xl:col-span-4 bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-border-light dark:border-border-dark shadow-subtle flex flex-col justify-between h-48 relative overflow-hidden">
+            <div className="flex justify-between items-start z-10">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[18px]">calendar_today</span>
+                Agenda de Hoy
+              </h3>
+            </div>
+            <div className="flex items-end justify-between z-10 mb-1">
+              <div className="flex flex-col">
+                <span className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">{todayAppointments}</span>
+                <span className="text-xs text-slate-500 font-medium mt-1">Citas programadas</span>
+              </div>
+              <button onClick={() => router.push('/appointments')} className="text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-900 px-4 py-2 rounded-lg transition-all flex items-center gap-2 shadow-lg shadow-slate-200 dark:shadow-none">
+                Ver Agenda
+                <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+              </button>
+            </div>
           </div>
+
+           {/* Quick Action - Leads */}
+           <div className="col-span-12 md:col-span-12 xl:col-span-4 bg-surface-light dark:bg-surface-dark p-6 rounded-2xl border border-border-light dark:border-border-dark shadow-subtle flex flex-col justify-between h-48 relative overflow-hidden">
+             <div className="flex justify-between items-start z-10">
+               <h3 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                 <span className="material-symbols-outlined text-red-500 text-[18px]">local_fire_department</span>
+                 Leads Calientes
+               </h3>
+             </div>
+             <div className="flex items-center gap-4 z-10 mt-2">
+               <div className="flex-1">
+                 <span className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">3</span>
+                 <div className="flex items-center gap-1 mt-1">
+                   <span className="text-xs text-green-600 font-bold">+1 nuevo</span>
+                 </div>
+               </div>
+               <button onClick={() => router.push('/gold-list')} className="w-full max-w-[120px] bg-primary text-white text-[12px] font-bold py-2 rounded-lg">Ver Leads</button>
+             </div>
+           </div>
+
         </div>
-      </main>
+      </div>
     </AppShell>
   );
 }
