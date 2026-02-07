@@ -4,7 +4,8 @@ import { getRangeValues, getSheetId } from '@/lib/sheets/client';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const hasEnv = !!getSheetId() && !!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const serviceEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || process.env.GOOGLE_CLIENT_EMAIL;
+  const hasEnv = !!getSheetId() && !!serviceEmail;
   
   let sheetConnection = false;
   let errorDetail = '';
